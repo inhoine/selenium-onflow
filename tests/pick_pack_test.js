@@ -1,8 +1,9 @@
-const { until } = require("selenium-webdriver");
+﻿const { until } = require("selenium-webdriver");
 const chrome = require("selenium-webdriver/chrome");
 const BaseTest = require("./BaseTest");
 const login_wms = require("../utils/login_wms");
 const PickAndPackOrderPage = require("../pages/PickAndPackOrderPage");
+const config = require("../config");
 const {
   getPickupDetail,
   getPickupPackingOrders,
@@ -11,13 +12,11 @@ const {
   commitPickingPickup,
 } = require("../utils/wms_api");
 
-const WMS_BASE_URL = "https://stg-wms.onflow.vn";
-const LOGIN_URL = `${WMS_BASE_URL}/login`;
-const EQUIPMENTS_URL = `${WMS_BASE_URL}/equipments?page=1&page_size=50`;
-const PICKUP_DETAIL_URL = (pickupId) =>
-  `${WMS_BASE_URL}/pickup-detail/${pickupId}`;
-const PICKUP_ID = "648195";
-const PACKING_MATERIAL_CODE = "40x20x20";
+const LOGIN_URL = `${config.urls.wms}/login`;
+const EQUIPMENTS_URL = `${config.urls.wms}/equipments?page=1&page_size=50`;
+const PICKUP_DETAIL_URL = (pickupId) => `${config.urls.wms}/pickup-detail/${pickupId}`;
+const PICKUP_ID = config.defaultPickupId;
+const PACKING_MATERIAL_CODE = config.defaultPackingMaterialCode;
 
 function buildChromeOptions() {
   const options = new chrome.Options();
@@ -35,9 +34,7 @@ async function createEquipment(pickAndPackOrder) {
     "Xe chứa",
     "Không ưu tiên",
   );
-  await pickAndPackOrder.verifyToastMessage(
-    "Thêm thiết bị chứa hàng thành công",
-  );
+  await pickAndPackOrder.verifyToastMessage("Thêm thiết bị chứa hàng thành công");
   console.log("Equipment code:", equipmentCode);
   return equipmentCode;
 }
@@ -49,15 +46,12 @@ async function executePickPackFlow(pickAndPackOrder, pickupId, token) {
   const packingOrders = await getPickupPackingOrders(pickupId, token);
   await pickAndPackOrder.scanTablePacking();
   await pickAndPackOrder.scanPickUpOrder(pickupId);
-  await pickAndPackOrder.packBySystemSuggestion(
-    packingOrders,
-    PACKING_MATERIAL_CODE,
-  );
+  await pickAndPackOrder.packBySystemSuggestion(packingOrders, PACKING_MATERIAL_CODE);
 }
 
 async function pickPackTest() {
   const options = buildChromeOptions();
-  const baseTest = new BaseTest("chrome", 15000, options);
+  const baseTest = new BaseTest("chrome", config.defaultTimeout, options);
   const driver = await baseTest.setup();
 
   try {
@@ -89,11 +83,24 @@ async function pickPackTest() {
     await executePickPackFlow(pickAndPackOrder, PICKUP_ID, token);
     console.log("Pick & pack flow completed");
   } catch (error) {
+    try {
+      const screenshotPath = await baseTest.saveScreenshot(`pick_pack_${Date.now()}.png`);
+      console.error(`Saved failure screenshot: ${screenshotPath}`);
+    } catch (screenshotError) {
+      console.warn("Unable to save screenshot:", screenshotError);
+    }
     console.error("Pick & pack test failed:", error);
     throw error;
   } finally {
-    // await baseTest.teardown();
+    await baseTest.teardown();
   }
 }
 
-pickPackTest();
+if (require.main === module) {
+  pickPackTest().catch((error) => {
+    console.error("Pick & Pack script failed:", error);
+    process.exit(1);
+  });
+}
+
+module.exports = pickPackTest;

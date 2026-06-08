@@ -1,3 +1,5 @@
+const fs = require("fs");
+const path = require("path");
 const { Builder, until } = require("selenium-webdriver");
 
 class BaseTest {
@@ -20,7 +22,11 @@ class BaseTest {
 
   async teardown() {
     if (this.driver) {
-      await this.driver.quit();
+      try {
+        await this.driver.quit();
+      } catch (error) {
+        console.warn("Failed to quit browser cleanly:", error);
+      }
       this.driver = null;
     }
   }
@@ -37,6 +43,22 @@ class BaseTest {
     const element = await this.waitForElement(locator, timeout);
     await this.driver.wait(until.elementIsVisible(element), timeout);
     return element;
+  }
+
+  async saveScreenshot(fileName) {
+    if (!this.driver) {
+      return null;
+    }
+
+    const screenshotsDir = path.resolve(process.cwd(), "screenshots");
+    if (!fs.existsSync(screenshotsDir)) {
+      fs.mkdirSync(screenshotsDir, { recursive: true });
+    }
+
+    const screenshotPath = path.join(screenshotsDir, fileName);
+    const screenshot = await this.driver.takeScreenshot();
+    fs.writeFileSync(screenshotPath, screenshot, "base64");
+    return screenshotPath;
   }
 }
 

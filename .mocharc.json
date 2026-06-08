@@ -1,0 +1,7 @@
+{
+  "spec": "tests/spec/**/*.spec.js",
+  "timeout": 60000,
+  "recursive": true,
+  "extension": ["js"],
+  "require": []
+}

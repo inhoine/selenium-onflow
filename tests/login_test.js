@@ -24,14 +24,14 @@ async function runLoginScenario({
     );
 
     if (shouldSucceed) {
-      await loginPage.selectFc("FC HN");
+      await loginPage.selectFc();
       const currentUrlAfterSelectFc = await baseTest.driver.getCurrentUrl();
       console.log(
         `-> ${name}: current URL after FC select = ${currentUrlAfterSelectFc}`,
       );
       await loginPage.waitForLoginSuccess();
       console.log(`✅ ${name} passed: login success`);
-      return;
+      return { status: "passed" };
     }
 
     await loginPage.waitForLoginFailure(10000);
@@ -71,7 +71,16 @@ async function runLoginScenario({
     console.log(
       `✅ ${name} passed: login rejected as expected${errorText ? ` (${errorText})` : " (no visible message)"}`,
     );
+    return { status: "passed" };
   } catch (error) {
+    try {
+      const screenshotPath = await baseTest.saveScreenshot(
+        `login_${name.replace(/\s+/g, "_")}_${Date.now()}.png`,
+      );
+      console.error(`Saved failure screenshot: ${screenshotPath}`);
+    } catch (screenshotError) {
+      console.warn("Unable to save screenshot:", screenshotError);
+    }
     console.error(`❌ ${name} failed:`, error);
     throw error;
   } finally {
@@ -88,39 +97,39 @@ async function loginTestSuite() {
       shouldSucceed: true,
     },
     {
-      name: "Negative case - invalid password",
+      name: "Negative case - wrong password",
       email: account.wms.email,
-      password: "WrongPassword123",
+      password: "IncorrectPassword123!",
       shouldSucceed: false,
-      expectedErrorContains: "Sai",
+      expectedErrorContains: "mật khẩu",
     },
     {
-      name: "Negative case - invalid email",
-      email: "invalid.email@nandh.vn",
+      name: "Negative case - invalid email format",
+      email: "invalid-email-format",
       password: account.wms.password,
       shouldSucceed: false,
-      expectedErrorContains: "không",
+      expectedErrorContains: "email",
     },
     {
-      name: "Edge case - empty email",
-      email: "",
-      password: account.wms.password,
-      shouldSucceed: false,
-      expectedErrorContains: "Vui lòng",
-    },
-    {
-      name: "Edge case - empty password",
+      name: "Negative case - missing password",
       email: account.wms.email,
       password: "",
       shouldSucceed: false,
-      expectedErrorContains: "Vui lòng",
+      expectedErrorContains: "vui lòng",
     },
     {
-      name: "Edge case - invalid email format",
-      email: "thanh.nn@nandh",
+      name: "Negative case - missing email",
+      email: "",
       password: account.wms.password,
       shouldSucceed: false,
-      expectedErrorContains: "Email không đúng định dạng",
+      expectedErrorContains: "vui lòng",
+    },
+    {
+      name: "Edge case - blank credentials",
+      email: "",
+      password: "",
+      shouldSucceed: false,
+      expectedErrorContains: "vui lòng",
     },
   ];
 
@@ -149,9 +158,19 @@ async function loginTestSuite() {
     (result) => result.status === "failed",
   ).length;
   if (failedCount > 0) {
-    console.error(`\n${failedCount} scenario(s) failed.`);
-    process.exit(1);
+    throw new Error(`${failedCount} scenario(s) failed.`);
   }
+
+  return results;
 }
 
-loginTestSuite();
+if (require.main === module) {
+  loginTestSuite()
+    .then(() => process.exit(0))
+    .catch((error) => {
+      console.error("Login test suite failed:", error);
+      process.exit(1);
+    });
+}
+
+module.exports = loginTestSuite;

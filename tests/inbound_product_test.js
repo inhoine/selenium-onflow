@@ -1,4 +1,4 @@
-const { until } = require("selenium-webdriver");
+﻿const { until } = require("selenium-webdriver");
 const BaseTest = require("./BaseTest");
 const login_oms = require("../utils/login_oms");
 const CreateInboundProductPage = require("../pages/CreateInboundProductPage");
@@ -7,28 +7,29 @@ const { receivedPOAtWarehouse, updatePutaway } = require("../utils/wms_api");
 const login_wms = require("../utils/login_wms");
 const scanTable = require("../utils/scan_table");
 const getPOSkus = require("../utils/get_po_skus");
+const config = require("../config");
 
 async function getWmsToken(driver) {
   await driver.wait(async () => {
     const token = await driver.executeScript(
-      `return localStorage.getItem("token");`,
+      'return localStorage.getItem("token");',
     );
     return token !== null;
-  }, 15000);
+  }, config.defaultTimeout);
 
-  return driver.executeScript(`return localStorage.getItem("token");`);
+  return driver.executeScript("return localStorage.getItem('token');");
 }
 
 async function inboundProductTest() {
-  const baseTest = new BaseTest("chrome", 15000);
+  const baseTest = new BaseTest("chrome", config.defaultTimeout);
   const driver = await baseTest.setup();
 
   try {
-    await baseTest.goTo("https://stg-oms.onflow.vn/login");
+    await baseTest.goTo(`${config.urls.oms}/login`);
     await login_oms(driver);
-    await driver.wait(until.urlContains("/dashboard"), 15000);
+    await driver.wait(until.urlContains("/dashboard"), config.defaultTimeout);
 
-    await baseTest.goTo("https://stg-oms.onflow.vn/list-shipment-inbound?");
+    await baseTest.goTo(`${config.urls.oms}/list-shipment-inbound?`);
 
     const createInboundProductPage = new CreateInboundProductPage(driver);
     await createInboundProductPage.clickCreateInboundBtn();
@@ -47,16 +48,19 @@ async function inboundProductTest() {
     const inboundCode = await createInboundProductPage.getInboundCode();
     console.log("Saved inbound code:", inboundCode);
 
-    await baseTest.goTo("https://stg-wms.onflow.vn/login");
+    await baseTest.goTo(`${config.urls.wms}/login`);
     const inboundProductWmsPage = new InboundProductWmsPage(driver);
     await login_wms(driver);
 
-    await driver.wait(until.urlContains("/user-setting"), 15000);
+    await driver.wait(
+      until.urlContains("/user-setting"),
+      config.defaultTimeout,
+    );
     const token = await getWmsToken(driver);
     console.log("WMS TOKEN:", token);
 
     await receivedPOAtWarehouse(inboundCode, token);
-    await baseTest.goTo("https://stg-wms.onflow.vn/inspection");
+    await baseTest.goTo(`${config.urls.wms}/inspection`);
 
     await scanTable(driver, "PACK02");
     await inboundProductWmsPage.scanPo(inboundCode);
@@ -79,8 +83,15 @@ async function inboundProductTest() {
     console.error("Inbound product test failed:", error);
     throw error;
   } finally {
-    // await baseTest.teardown();
+    await baseTest.teardown();
   }
 }
 
-inboundProductTest();
+if (require.main === module) {
+  inboundProductTest().catch((error) => {
+    console.error("Inbound product test failed:", error);
+    process.exit(1);
+  });
+}
+
+module.exports = inboundProductTest;

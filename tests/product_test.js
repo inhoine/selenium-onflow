@@ -5,12 +5,12 @@ const ListingProductPage = require("../pages/ListingProductPage");
 const AssignProductPage = require("../pages/AssignProductPage");
 const login_oms = require("../utils/login_oms");
 const login_ops = require("../utils/login_ops");
+const config = require("../config");
 
 const urls = {
-  omsLogin: "https://stg-oms.onflow.vn/login",
-  omsProductList:
-    "https://stg-oms.onflow.vn/products?page=1&page_size=50&return_type=list_linked_platform&status_group=all&type_filter=all",
-  opsLogin: "https://stg-ops.onflow.vn/login",
+  omsLogin: `${config.urls.oms}/login`,
+  omsProductList: `${config.urls.oms}/products?page=1&page_size=50&return_type=list_linked_platform&status_group=all&type_filter=all`,
+  opsLogin: `${config.urls.ops}/login`,
 };
 
 async function switchToMainWindow(driver, mainWindowHandle) {
@@ -300,7 +300,7 @@ async function runProductTestSuite() {
     console.error("Product test suite failed during setup:", error);
     process.exit(1);
   } finally {
-    // await baseTest.teardown();
+    await baseTest.teardown();
   }
 
   console.log("\n=== Product test suite summary ===");
