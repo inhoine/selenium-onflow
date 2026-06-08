@@ -122,6 +122,19 @@ class AssignProductPage {
   }
 
   async searchProduct(sku) {
+    await this.driver.wait(
+      async () => {
+        try {
+          const element = await this.findSearchInput();
+          return element && (await element.isDisplayed());
+        } catch (err) {
+          return false;
+        }
+      },
+      15000,
+      "Search input not visible on OPS page",
+    );
+
     const searchInput = await this.findSearchInput();
     await this.driver.wait(until.elementIsVisible(searchInput), 10000);
     await searchInput.clear();
@@ -170,6 +183,7 @@ class AssignProductPage {
   }
 
   async assignProductToWarehouse() {
+    await this.driver.sleep(1500);
     await this.waitAndClick(this.checkboxSelectAll, 10000);
     console.log("Selected all products");
 
@@ -191,7 +205,17 @@ class AssignProductPage {
     await this.driver.wait(until.elementIsVisible(finalConfirmBtn), 15000);
     await this.driver.executeScript("arguments[0].click();", finalConfirmBtn);
     console.log("Clicked final confirm button");
-    await this.driver.sleep(2000);
+
+    try {
+      await this.driver.wait(until.stalenessOf(finalConfirmBtn), 10000);
+      console.log("Final confirm dialog dismissed");
+    } catch (error) {
+      console.log(
+        "Final confirm dialog did not disappear in time, continuing after wait",
+      );
+    }
+
+    await this.driver.sleep(5000);
   }
 }
 

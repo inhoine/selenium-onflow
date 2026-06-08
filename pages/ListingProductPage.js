@@ -25,7 +25,7 @@ class ListingProductPage {
 
   async accessListingProduct() {
     await this.driver.sleep(2000);
-    const originalTab = await this.driver.getWindowHandle();
+    const originalHandles = await this.driver.getAllWindowHandles();
     const listingBtn = await this.driver.wait(
       until.elementLocated(this.listingProductBtn),
       10000,
@@ -33,15 +33,25 @@ class ListingProductPage {
     await this.driver.wait(until.elementIsVisible(listingBtn), 10000);
     await listingBtn.click();
 
-    await this.driver.wait(async () => {
-      const handles = await this.driver.getAllWindowHandles();
-      return handles.length > 1;
-    }, 10000);
+    await this.driver
+      .wait(async () => {
+        const handles = await this.driver.getAllWindowHandles();
+        return handles.length > originalHandles.length;
+      }, 10000)
+      .catch(() => {
+        // If no new tab opens, continue on current tab
+      });
 
     const allTabs = await this.driver.getAllWindowHandles();
-    const newTab = allTabs.find((tab) => tab !== originalTab);
-    await this.driver.switchTo().window(newTab);
-    console.log("Switched to listing tab");
+    const newTabs = allTabs.filter(
+      (handle) => !originalHandles.includes(handle),
+    );
+    if (newTabs.length > 0) {
+      await this.driver.switchTo().window(newTabs[newTabs.length - 1]);
+      console.log("Switched to new listing tab");
+    } else {
+      console.log("No new tab opened for listing; staying in current tab");
+    }
   }
 
   async selectSalesChannel() {

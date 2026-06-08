@@ -46,6 +46,10 @@ class ProductPage {
 
   createProductBtn = By.xpath("//button[contains(.,'Tạo sản phẩm')]");
 
+  validationErrorLocator = By.xpath(
+    "//*[contains(@class,'ant-form-item-explain') or contains(@class,'error') or contains(@class,'invalid') or contains(normalize-space(.),'Vui lòng') or contains(normalize-space(.),'không được') or contains(normalize-space(.),'bắt buộc')][normalize-space(string())!='']",
+  );
+
   searchInput = By.xpath(
     "//input[@placeholder='Tìm kiếm theo SKU, tên sản phẩm, NHSIN, Barcode, SKU mẫu mã, NHSIN mẫu mã, Barcode mẫu mã']",
   );
@@ -70,18 +74,16 @@ class ProductPage {
     await this.waitAndClick(this.createProductMenuItem);
   }
 
-  async inputProductInfor() {
-    const randomNUM = Date.now().toString().slice(-6);
-    const sku = `SKU-${randomNUM}`;
-    const productName = `Prod-Auto-${randomNUM}`;
-
+  async fillBasicInfo({ sku, productName } = {}) {
     const skuInput = await this.driver.wait(
       until.elementLocated(this.skuInput),
       10000,
     );
     await this.driver.wait(until.elementIsVisible(skuInput), 10000);
     await skuInput.clear();
-    await skuInput.sendKeys(sku);
+    if (sku !== undefined && sku !== null) {
+      await skuInput.sendKeys(sku);
+    }
 
     const nameInput = await this.driver.wait(
       until.elementLocated(this.nameInput),
@@ -89,11 +91,21 @@ class ProductPage {
     );
     await this.driver.wait(until.elementIsVisible(nameInput), 10000);
     await nameInput.clear();
-    await nameInput.sendKeys(productName);
+    if (productName !== undefined && productName !== null) {
+      await nameInput.sendKeys(productName);
+    }
+  }
+
+  async inputProductInfor({ sku, productName } = {}) {
+    const randomNUM = Date.now().toString().slice(-6);
+    const finalSku = sku ?? `SKU-${randomNUM}`;
+    const finalProductName = productName ?? `Prod-Auto-${randomNUM}`;
+
+    await this.fillBasicInfo({ sku: finalSku, productName: finalProductName });
 
     return {
-      sku,
-      productName,
+      sku: finalSku,
+      productName: finalProductName,
     };
   }
 
@@ -129,18 +141,71 @@ class ProductPage {
     await this.waitAndClick(this.confirmCategoryBtn);
   }
 
-  async priceProduct() {
+  async fillCostPrice(value) {
     const costInput = await this.driver.wait(
       until.elementLocated(this.costPriceField),
       10000,
     );
-    await costInput.sendKeys("200000");
+    await costInput.clear();
+    if (value !== undefined && value !== null) {
+      await costInput.sendKeys(value);
+    }
+  }
 
+  async fillSellPrice(value) {
     const sellInput = await this.driver.wait(
       until.elementLocated(this.sellPriceField),
       10000,
     );
-    await sellInput.sendKeys("200000");
+    await sellInput.clear();
+    if (value !== undefined && value !== null) {
+      await sellInput.sendKeys(value);
+    }
+  }
+
+  async priceProduct() {
+    await this.fillCostPrice("200000");
+    await this.fillSellPrice("200000");
+  }
+
+  async fillWeight(value) {
+    const weightInput = await this.driver.wait(
+      until.elementLocated(this.weightField),
+      10000,
+    );
+    await weightInput.clear();
+    if (value !== undefined && value !== null) {
+      await weightInput.sendKeys(value);
+    }
+  }
+
+  async fillDimensions({ length, width, height } = {}) {
+    const lengthInput = await this.driver.wait(
+      until.elementLocated(this.lengthField),
+      10000,
+    );
+    await lengthInput.clear();
+    if (length !== undefined && length !== null) {
+      await lengthInput.sendKeys(length);
+    }
+
+    const widthInput = await this.driver.wait(
+      until.elementLocated(this.widthField),
+      10000,
+    );
+    await widthInput.clear();
+    if (width !== undefined && width !== null) {
+      await widthInput.sendKeys(width);
+    }
+
+    const heightInput = await this.driver.wait(
+      until.elementLocated(this.heightField),
+      10000,
+    );
+    await heightInput.clear();
+    if (height !== undefined && height !== null) {
+      await heightInput.sendKeys(height);
+    }
   }
 
   async demensionProduct() {
@@ -219,6 +284,48 @@ class ProductPage {
       submitButton,
     );
     await submitButton.click();
+  }
+
+  async getCreateProductErrorText() {
+    const errorElements = await this.driver.findElements(
+      this.validationErrorLocator,
+    );
+    for (const element of errorElements) {
+      try {
+        if (await element.isDisplayed()) {
+          const text = await element.getText();
+          if (text && text.trim() && text.trim().length < 300) {
+            return text.trim();
+          }
+        }
+      } catch (error) {
+        // ignore stale elements
+      }
+    }
+    return "";
+  }
+
+  async waitForCreateProductFailure(timeout = 10000) {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const errorText = await this.getCreateProductErrorText();
+      if (errorText) {
+        return;
+      }
+
+      try {
+        const submitButtons = await this.driver.findElements(
+          this.createProductBtn,
+        );
+        if (submitButtons.length > 0) {
+          return;
+        }
+      } catch (error) {
+        // continue retry
+      }
+
+      await this.driver.sleep(500);
+    }
   }
 
   async searchProduct(sku) {

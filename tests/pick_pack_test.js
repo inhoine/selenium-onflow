@@ -16,7 +16,7 @@ const LOGIN_URL = `${WMS_BASE_URL}/login`;
 const EQUIPMENTS_URL = `${WMS_BASE_URL}/equipments?page=1&page_size=50`;
 const PICKUP_DETAIL_URL = (pickupId) =>
   `${WMS_BASE_URL}/pickup-detail/${pickupId}`;
-const PICKUP_ID = "881485";
+const PICKUP_ID = "648195";
 const PACKING_MATERIAL_CODE = "40x20x20";
 
 function buildChromeOptions() {
@@ -92,7 +92,7 @@ async function pickPackTest() {
     console.error("Pick & pack test failed:", error);
     throw error;
   } finally {
-    await baseTest.teardown();
+    // await baseTest.teardown();
   }
 }
 
