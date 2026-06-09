@@ -1,0 +1,34 @@
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<suite name="Selenium Learning TestNG" parallel="false">
+    <parameter name="browser" value="chrome"/>
+
+    <test name="Login">
+        <classes>
+            <class name="com.example.seleniumtestng.tests.LoginTest"/>
+        </classes>
+    </test>
+
+    <test name="Product">
+        <classes>
+            <class name="com.example.seleniumtestng.tests.ProductTest"/>
+        </classes>
+    </test>
+
+    <test name="Inbound Product">
+        <classes>
+            <class name="com.example.seleniumtestng.tests.InboundProductTest"/>
+        </classes>
+    </test>
+
+    <test name="Create Order">
+        <classes>
+            <class name="com.example.seleniumtestng.tests.CreateOrderTest"/>
+        </classes>
+    </test>
+
+    <test name="Pick Pack">
+        <classes>
+            <class name="com.example.seleniumtestng.tests.PickPackTest"/>
+        </classes>
+    </test>
+</suite>

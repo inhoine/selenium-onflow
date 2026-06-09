@@ -1,0 +1,265 @@
+package com.example.seleniumtestng.pages;
+
+import com.example.seleniumtestng.config.ConfigReader;
+import com.example.seleniumtestng.utils.PackingOrder;
+import com.example.seleniumtestng.utils.PickupItem;
+import com.example.seleniumtestng.utils.ScanTable;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import org.openqa.selenium.By;
+import org.openqa.selenium.Keys;
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.WebElement;
+
+public class PickAndPackOrderPage extends BasePage {
+    private static final long SHORT_DELAY_MS = 100;
+    private static final long MATERIAL_DELAY_MS = 500;
+
+    private final By addEquipmentBtn = By.xpath("//button[normalize-space()='Thêm thiết bị chứa hàng' or normalize-space()='Them thiet bi chua hang']");
+    private final By equipmentCodeField = By.xpath("//div[contains(.,'Thêm thiết bị mới') or contains(.,'Them thiet bi moi')]//input[contains(@placeholder,'mã thiết bị') or contains(@placeholder,'ma thiet bi')]");
+    private final By equipmentGroupDropdown = By.xpath("//div[normalize-space()='Chọn nhóm thiết bị' or normalize-space()='Chon nhom thiet bi']");
+    private final By equipmentTypeDropdown = By.xpath("//div[normalize-space()='Chọn loại thiết bị' or normalize-space()='Chon loai thiet bi']");
+    private final By submitEquipmentBtn = By.cssSelector("button[type='submit']");
+    private final By scanPackingTrolleyField = By.xpath("//input[@placeholder='Quét mã XE/ bảng kê cần đóng gói']");
+    private final By receivePackingTrolleyBtn = By.xpath("//button[normalize-space()='Nhận bảng kê' or normalize-space()='Nhan bang ke']");
+    private final By scanPickUpField = By.xpath("//input[@placeholder='Quét mã Xe/ Bảng kê/ Rổ']");
+    private final By scanSkuField = By.xpath("//input[contains(@placeholder,'Sản phẩm') or contains(@placeholder,'San pham')]");
+    private final By packagingMaterialsField = By.xpath("//input[@placeholder='Quét hoặc nhập mã vật liệu đóng gói']");
+    private final By productRows = By.xpath("//tr[.//div[contains(@id,'barcode_')]]");
+    private final By currentTrackingCode = By.xpath("//h6[contains(.,'Bạn đang đóng gói cho đơn hàng')]//span[contains(@class,'fw-medium')]");
+
+    public PickAndPackOrderPage(WebDriver driver) {
+        super(driver);
+    }
+
+    public String addEquipment(String equipmentGroupName, String equipmentTypeName) {
+        String equipmentCode = "THIET-BI-" + (System.currentTimeMillis() % 100000);
+        click(addEquipmentBtn);
+        type(equipmentCodeField, equipmentCode);
+        click(equipmentGroupDropdown);
+        jsClick(visible(exactOption(equipmentGroupName)));
+        click(equipmentTypeDropdown);
+        jsClick(visible(exactOption(equipmentTypeName)));
+        click(submitEquipmentBtn);
+        return equipmentCode;
+    }
+
+    public String verifyToastMessage(String message) {
+        return visible(By.xpath("//div[contains(@class,'Toastify__toast-body')]//div[contains(normalize-space(.),'" + message + "')]")).getText();
+    }
+
+    public boolean verifyToastMessageIfPresent(String message, long timeoutMillis) {
+        try {
+            String text = shortWait(timeoutMillis)
+                    .until(driver -> {
+                        List<WebElement> toasts = driver.findElements(By.xpath("//div[contains(@class,'Toastify__toast-body')]//div[contains(normalize-space(.),'" + message + "')]"));
+                        for (WebElement toast : toasts) {
+                            try {
+                                if (toast.isDisplayed()) {
+                                    return toast.getText();
+                                }
+                            } catch (RuntimeException ignored) {
+                            }
+                        }
+                        return null;
+                    });
+            System.out.println("Toast: " + text);
+            return true;
+        } catch (RuntimeException ignored) {
+            System.out.println("Toast not found, continue: " + message);
+            return false;
+        }
+    }
+
+    public void receivePackingTrolley(String pickupId) {
+        driver.get(ConfigReader.required("WMS_BASE_URL") + "/receive-packing-trolley");
+        WebElement input = visible(scanPackingTrolleyField);
+        input.click();
+        input.sendKeys(pickupId, Keys.ENTER);
+        click(receivePackingTrolleyBtn);
+    }
+
+    public void scanTablePacking() {
+        driver.get(ConfigReader.required("WMS_BASE_URL") + "/packing");
+        new ScanTable(driver).scan("PACK02");
+        visible(scanPickUpField);
+    }
+
+    public void scanPickUpOrder(String pickupId) {
+        WebElement input = visible(scanPickUpField);
+        clearAndEnter(input, pickupId);
+    }
+
+    public void packBySystemSuggestion(List<PackingOrder> packingOrders, String materialCode) {
+        Set<String> processedTrackingCodes = new HashSet<>();
+        for (PackingOrder order : packingOrders) {
+            if (processedTrackingCodes.contains(order.trackingCode())) {
+                continue;
+            }
+
+            PickupItem firstPending = firstPendingItem(order);
+            if (firstPending == null) {
+                System.out.println("Skip " + order.trackingCode() + ": no pending item by API quantities");
+                processedTrackingCodes.add(order.trackingCode());
+                continue;
+            }
+
+            String firstBarcode = getItemBarcode(firstPending);
+            System.out.println("Scan first product to let system suggest order: tracking="
+                    + order.trackingCode() + ", barcode=" + firstBarcode);
+            scanProductBarcode(firstBarcode);
+            String currentTracking = getCurrentPackingTrackingCode();
+            if (!processedTrackingCodes.contains(currentTracking)) {
+                System.out.println("Packing suggested tracking: " + currentTracking);
+                packCurrentSuggestedOrder(materialCode);
+                processedTrackingCodes.add(currentTracking);
+            } else {
+                System.out.println("Skip already processed tracking: " + currentTracking);
+            }
+            // sleep(SHORT_DELAY_MS);
+        }
+    }
+
+    public void packOrdersByTrackingCode(List<PackingOrder> packingOrders, String materialCode) {
+        for (PackingOrder order : packingOrders) {
+            boolean scanned = false;
+            for (PickupItem item : order.items()) {
+                String barcode = getItemBarcode(item);
+                int quantityNeedScan = getQuantityNeedScan(item);
+                if (barcode == null || quantityNeedScan <= 0) {
+                    continue;
+                }
+                for (int i = 0; i < quantityNeedScan; i++) {
+                    scanProductBarcode(barcode);
+                    scanned = true;
+                }
+            }
+            if (scanned) {
+                scanPackagingMaterial(materialCode);
+                // sleep(MATERIAL_DELAY_MS);
+            }
+        }
+    }
+
+    private PickupItem firstPendingItem(PackingOrder order) {
+        for (PickupItem item : order.items()) {
+            if (getItemBarcode(item) != null && getQuantityNeedScan(item) > 0) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    private void packCurrentSuggestedOrder(String materialCode) {
+        while (true) {
+            PackingUiItem pending = firstPendingUiItem();
+            if (pending == null) {
+                break;
+            }
+            scanProductBarcode(pending.barcode());
+            sleep(SHORT_DELAY_MS);
+        }
+        scanPackagingMaterial(materialCode);
+    }
+
+    private PackingUiItem firstPendingUiItem() {
+        for (PackingUiItem item : getCurrentPackingItemsFromUi()) {
+            if (item.needScan() > 0) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    private List<PackingUiItem> getCurrentPackingItemsFromUi() {
+        List<WebElement> rows = wait.until(driver -> {
+            List<WebElement> elements = all(productRows);
+            return elements.isEmpty() ? null : elements;
+        });
+        List<PackingUiItem> items = new ArrayList<>();
+        for (WebElement row : rows) {
+            String rowText = row.getText();
+            String barcode = row.findElement(By.xpath(".//div[contains(@id,'barcode_')]")).getText().trim();
+            String qtyText = row.findElement(By.xpath(".//td[contains(@class,'text-right')]//h5")).getText().trim();
+            String[] parts = qtyText.split("/");
+            int packed = Integer.parseInt(parts[0].trim());
+            int total = Integer.parseInt(parts[1].trim());
+            items.add(new PackingUiItem(barcode, total - packed));
+            System.out.println("Packing UI row: barcode=" + barcode
+                    + ", qty=" + qtyText
+                    + ", needScan=" + (total - packed)
+                    + ", row=" + rowText.replaceAll("\\s+", " "));
+        }
+        return items;
+    }
+
+    private void scanProductBarcode(String barcode) {
+        WebElement input = wait.until(driver -> {
+            for (WebElement element : all(scanSkuField)) {
+                try {
+                    if (element.isDisplayed() && element.isEnabled()) {
+                        return element;
+                    }
+                } catch (RuntimeException ignored) {
+                }
+            }
+            return null;
+        });
+        jsClick(input);
+        clearAndEnter(input, barcode);
+        // sleep(SHORT_DELAY_MS);
+    }
+
+    private void scanPackagingMaterial(String materialCode) {
+        clearAndEnter(visible(packagingMaterialsField), materialCode);
+        sleep(MATERIAL_DELAY_MS);
+    }
+
+    private String getCurrentPackingTrackingCode() {
+        return visible(currentTrackingCode).getText().trim();
+    }
+
+    private String getItemBarcode(PickupItem item) {
+        if (item.barcodes() != null && !item.barcodes().isEmpty()) {
+            return item.barcodes().get(0);
+        }
+        return item.partnerCode();
+    }
+
+    private int getQuantityNeedScan(PickupItem item) {
+        return item.quantitySold() - item.quantityPick();
+    }
+
+    private By exactOption(String value) {
+        return By.xpath("//*[contains(@class,'-menu')]//*[normalize-space(.)='" + value + "']");
+    }
+
+    private void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting", e);
+        }
+    }
+
+    private static final class PackingUiItem {
+        private final String barcode;
+        private final int needScan;
+
+        private PackingUiItem(String barcode, int needScan) {
+            this.barcode = barcode;
+            this.needScan = needScan;
+        }
+
+        private String barcode() {
+            return barcode;
+        }
+
+        private int needScan() {
+            return needScan;
+        }
+    }
+}
