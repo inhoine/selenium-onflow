@@ -3,7 +3,6 @@ package com.example.seleniumtestng.pages;
 import com.example.seleniumtestng.utils.POSku;
 import java.util.List;
 import org.openqa.selenium.By;
-import org.openqa.selenium.Keys;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.ui.ExpectedConditions;
@@ -41,12 +40,9 @@ public class InboundProductWmsPage extends BasePage {
         click(selectProductBtn);
         List<WebElement> inspectButtons = all(By.xpath("//button[@role='menuitem' and (contains(.,'Kiểm hàng') or contains(.,'Kiem hang'))]"));
         for (WebElement button : inspectButtons) {
-            try {
-                if (button.isDisplayed()) {
-                    button.click();
-                    return;
-                }
-            } catch (RuntimeException ignored) {
+            if (isDisplayed(button)) {
+                button.click();
+                return;
             }
         }
         throw new IllegalStateException("Visible inspect product button not found");
@@ -85,14 +81,27 @@ public class InboundProductWmsPage extends BasePage {
             return;
         }
         for (WebElement input : all(locator)) {
-            try {
-                if (input.isDisplayed() && input.isEnabled() && input.getAttribute("readonly") == null) {
-                    input.clear();
-                    input.sendKeys(String.valueOf(value));
-                    return;
-                }
-            } catch (RuntimeException ignored) {
+            if (isEditable(input)) {
+                input.clear();
+                input.sendKeys(String.valueOf(value));
+                return;
             }
+        }
+    }
+
+    private boolean isDisplayed(WebElement element) {
+        try {
+            return element.isDisplayed();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private boolean isEditable(WebElement input) {
+        try {
+            return input.isDisplayed() && input.isEnabled() && input.getDomAttribute("readonly") == null;
+        } catch (RuntimeException e) {
+            return false;
         }
     }
 }

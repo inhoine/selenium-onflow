@@ -72,6 +72,12 @@ public class CreateOrderOmsPage extends BasePage {
         return orderNumber;
     }
 
+    public String inputOrderNumber(int orderIndex) {
+        String orderNumber = "ORD-" + System.currentTimeMillis() + "-" + orderIndex;
+        type(orderNumberField, orderNumber);
+        return orderNumber;
+    }
+
     public void confirmCreateOrder() {
         click(continueBtn);
         wait.until(ExpectedConditions.elementToBeClickable(createBtn));
