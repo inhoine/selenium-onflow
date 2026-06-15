@@ -11,10 +11,13 @@ import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import org.testng.annotations.Test;
 
+@SuppressWarnings("null")
 public class CreateOrderTest extends BaseTest {
     @Test
     public void createB2cOrderAndPickupOrder() {
-        int orderCount = Integer.parseInt(ConfigReader.getOrDefault("CREATE_ORDER_COUNT", "3"));
+        int CREATE_ORDER_COUNT= 4;
+
+        int orderCount = CREATE_ORDER_COUNT;
         List<String> trackingCodes = new ArrayList<>();
 
         driver.get(url("OMS", "/login"));
@@ -49,7 +52,7 @@ public class CreateOrderTest extends BaseTest {
         createOrder.selectCustomerOms("Thành Ngọc");
         createOrder.selectSaleStore("B2C");
         createOrder.selectChoosePickup("PK100270");
-        createOrder.addProductToCreateOrder("SKU-200163", 2);
+        createOrder.addProductToCreateOrder("SKU-579065", 10);
         // createOrder.addNewProductRow();
         // createOrder.addProductToCreateOrder("MHMSI", 2);
         String orderNumber = createOrder.inputOrderNumber(orderIndex);

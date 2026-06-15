@@ -12,6 +12,7 @@ import java.util.List;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.testng.annotations.Test;
 
+@SuppressWarnings("null")
 public class InboundProductTest extends BaseTest {
     @Test
     public void createAndInspectInboundProduct() {
@@ -27,9 +28,9 @@ public class InboundProductTest extends BaseTest {
         createInbound.selectSupplier("Supplier A");
         createInbound.inputReference();
         createInbound.clickAddProduct();
-        createInbound.addProductToInbound("SKU-200163", 200);
-        createInbound.addNewProductRow();
-        createInbound.addProductToInbound("A-16", 150);
+        createInbound.addProductToInbound("SKU-579065", 200);
+        // createInbound.addNewProductRow();
+        // createInbound.addProductToInbound("A-16", 150);
         createInbound.confirmItems();
         createInbound.inputProductDimensions(30, 20, 40);
         createInbound.confirmCreateInbound();

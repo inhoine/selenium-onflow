@@ -7,6 +7,7 @@ import org.testng.Assert;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
+@SuppressWarnings("null")
 public class LoginTest extends BaseTest {
     @DataProvider(name = "loginScenarios")
     public Object[][] loginScenarios() {
@@ -31,7 +32,7 @@ public class LoginTest extends BaseTest {
         if (shouldSucceed) {
             loginPage.selectFc();
             loginPage.waitForLoginSuccess();
-            Assert.assertFalse(driver.getCurrentUrl().contains("/login"), name);
+            Assert.assertFalse(String.valueOf(driver.getCurrentUrl()).contains("/login"), name);
             return;
         }
 

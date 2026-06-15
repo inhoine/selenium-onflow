@@ -7,6 +7,7 @@ import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.support.ui.WebDriverWait;
 
+@SuppressWarnings("null")
 public final class AuthHelper {
     private AuthHelper() {
     }
@@ -22,12 +23,12 @@ public final class AuthHelper {
         AccountConfig.Credentials credentials = AccountConfig.ops();
         LoginPage loginPage = new LoginPage(driver);
         new WebDriverWait(driver, Duration.ofSeconds(20)).until(d -> {
-            String currentUrl = d.getCurrentUrl();
+            String currentUrl = String.valueOf(d.getCurrentUrl());
             return !currentUrl.contains("/login") || !d.findElements(org.openqa.selenium.By.cssSelector("input[type='email'], input[placeholder*='email']")).isEmpty();
         });
-        if (driver.getCurrentUrl().contains("/login")) {
+        if (String.valueOf(driver.getCurrentUrl()).contains("/login")) {
             loginPage.login(credentials.email(), credentials.password());
-            new WebDriverWait(driver, Duration.ofSeconds(20)).until(d -> !d.getCurrentUrl().contains("/login"));
+            new WebDriverWait(driver, Duration.ofSeconds(20)).until(d -> !String.valueOf(d.getCurrentUrl()).contains("/login"));
         }
     }
 

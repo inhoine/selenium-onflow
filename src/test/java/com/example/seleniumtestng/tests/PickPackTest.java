@@ -10,10 +10,12 @@ import java.util.List;
 import org.openqa.selenium.JavascriptExecutor;
 import org.testng.annotations.Test;
 
+@SuppressWarnings("null")
 public class PickPackTest extends BaseTest {
     @Test
     public void pickAndPackPickupOrder() {
-        String pickupId = ConfigReader.required("DEFAULT_PICKUP_ID");
+        String DEFAULT_PICKUP_ID= "119067";
+        String pickupId = DEFAULT_PICKUP_ID;
         String packingMaterialCode = ConfigReader.getOrDefault("DEFAULT_PACKING_MATERIAL_CODE", "40x20x20");
         System.out.println("PickPack pickupId=" + pickupId + ", packingMaterialCode=" + packingMaterialCode);
 

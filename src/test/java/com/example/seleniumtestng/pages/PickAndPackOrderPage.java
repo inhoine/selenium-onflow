@@ -13,8 +13,8 @@ import org.openqa.selenium.Keys;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 
+@SuppressWarnings("null")
 public class PickAndPackOrderPage extends BasePage {
-    private static final long SHORT_DELAY_MS = 100;
     private static final long MATERIAL_DELAY_MS = 500;
 
     private final By addEquipmentBtn = By.xpath("//button[normalize-space()='Thêm thiết bị chứa hàng' or normalize-space()='Them thiet bi chua hang']");
@@ -27,6 +27,7 @@ public class PickAndPackOrderPage extends BasePage {
     private final By scanPickUpField = By.xpath("//input[@placeholder='Quét mã Xe/ Bảng kê/ Rổ']");
     private final By scanSkuField = By.xpath("//input[contains(@placeholder,'Sản phẩm') or contains(@placeholder,'San pham')]");
     private final By packagingMaterialsField = By.xpath("//input[@placeholder='Quét hoặc nhập mã vật liệu đóng gói']");
+    private final By fallbackPackagingMaterial = By.xpath("//*[contains(normalize-space(.),'Băng keo') or contains(normalize-space(.),'Bang keo')]");
     private final By productRows = By.xpath("//tr[.//div[contains(@id,'barcode_')]]");
     private final By currentTrackingCode = By.xpath("//h6[contains(.,'Bạn đang đóng gói cho đơn hàng')]//span[contains(@class,'fw-medium')]");
 
@@ -118,7 +119,6 @@ public class PickAndPackOrderPage extends BasePage {
             } else {
                 System.out.println("Skip already processed tracking: " + currentTracking);
             }
-            // sleep(SHORT_DELAY_MS);
         }
     }
 
@@ -132,8 +132,11 @@ public class PickAndPackOrderPage extends BasePage {
                     continue;
                 }
                 for (int i = 0; i < quantityNeedScan; i++) {
-                    scanProductBarcode(barcode);
-                    scanned = true;
+                    if (scanProductBarcode(barcode)) {
+                        scanned = true;
+                    } else {
+                        break;
+                    }
                 }
             }
             if (scanned) {
@@ -154,12 +157,19 @@ public class PickAndPackOrderPage extends BasePage {
 
     private void packCurrentSuggestedOrder(String materialCode) {
         while (true) {
+            if (isPackagingMaterialPromptVisibleNow()) {
+                break;
+            }
             PackingUiItem pending = firstPendingUiItem();
             if (pending == null) {
                 break;
             }
-            scanProductBarcode(pending.barcode());
-            sleep(SHORT_DELAY_MS);
+            if (!scanProductBarcode(pending.barcode())) {
+                break;
+            }
+            if (isPackagingMaterialPromptVisibleNow()) {
+                break;
+            }
         }
         scanPackagingMaterial(materialCode);
     }
@@ -195,7 +205,7 @@ public class PickAndPackOrderPage extends BasePage {
         return items;
     }
 
-    private void scanProductBarcode(String barcode) {
+    private boolean scanProductBarcode(String barcode) {
         WebElement input = wait.until(driver -> {
             for (WebElement element : all(scanSkuField)) {
                 try {
@@ -207,14 +217,105 @@ public class PickAndPackOrderPage extends BasePage {
             }
             return null;
         });
-        jsClick(input);
-        clearAndEnter(input, barcode);
-        // sleep(SHORT_DELAY_MS);
+        try {
+            jsClick(input);
+            clearAndEnter(input, barcode);
+            return true;
+        } catch (RuntimeException error) {
+            if (isPackagingMaterialPromptVisibleNow() || !hasPendingUiItemsNow()) {
+                System.out.println("Product scan is complete; switch to material scan.");
+                return false;
+            }
+            throw error;
+        }
     }
 
     private void scanPackagingMaterial(String materialCode) {
-        clearAndEnter(visible(packagingMaterialsField), materialCode);
+        WebElement input = findVisiblePackagingMaterialInput(5000);
+        if (input == null) {
+            clickFallbackPackagingMaterial(materialCode);
+            return;
+        }
+        clearAndEnter(input, materialCode);
         sleep(MATERIAL_DELAY_MS);
+    }
+
+    private WebElement findVisiblePackagingMaterialInput(long timeoutMillis) {
+        try {
+            return shortWait(timeoutMillis).until(driver -> {
+                for (WebElement element : all(packagingMaterialsField)) {
+                    try {
+                        if (element.isDisplayed() && element.isEnabled()) {
+                            return element;
+                        }
+                    } catch (RuntimeException ignored) {
+                    }
+                }
+                return null;
+            });
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private void clickFallbackPackagingMaterial(String materialCode) {
+        WebElement material = findVisible(By.xpath("//*[contains(normalize-space(.),'" + materialCode + "')]"), 1000);
+        if (material == null) {
+            material = visible(fallbackPackagingMaterial);
+        }
+        jsClick(material);
+        sleep(MATERIAL_DELAY_MS);
+    }
+
+    private boolean hasPendingUiItemsNow() {
+        List<WebElement> rows = all(productRows);
+        if (rows.isEmpty()) {
+            return true;
+        }
+        for (WebElement row : rows) {
+            try {
+                String qtyText = row.findElement(By.xpath(".//td[contains(@class,'text-right')]//h5")).getText().trim();
+                String[] parts = qtyText.split("/");
+                int packed = Integer.parseInt(parts[0].trim());
+                int total = Integer.parseInt(parts[1].trim());
+                if (total - packed > 0) {
+                    return true;
+                }
+            } catch (RuntimeException ignored) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isPackagingMaterialPromptVisibleNow() {
+        for (WebElement element : driver.findElements(packagingMaterialsField)) {
+            try {
+                if (element.isDisplayed() && element.isEnabled()) {
+                    return true;
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+        return false;
+    }
+
+    private WebElement findVisible(By locator, long timeoutMillis) {
+        try {
+            return shortWait(timeoutMillis).until(driver -> {
+                for (WebElement element : driver.findElements(locator)) {
+                    try {
+                        if (element.isDisplayed()) {
+                            return element;
+                        }
+                    } catch (RuntimeException ignored) {
+                    }
+                }
+                return null;
+            });
+        } catch (RuntimeException ignored) {
+            return null;
+        }
     }
 
     private String getCurrentPackingTrackingCode() {

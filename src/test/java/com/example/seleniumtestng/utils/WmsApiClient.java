@@ -66,7 +66,7 @@ public class WmsApiClient {
             }
             String body = "{"
                     + "\"dr_id\":" + task.path("dr_id").asLong() + ","
-                    + "\"location_code\":\"A-01-02-006\","
+                    + "\"location_code\":\"HCM-01-01\","
                     + "\"quantity_putaway\":" + task.path("quantity").asInt()
                     + "}";
             request("POST", "/v1/putaway/update?", token, body, false);
