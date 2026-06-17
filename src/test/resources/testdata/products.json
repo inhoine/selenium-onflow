@@ -1,0 +1,14 @@
+{
+  "inboundProducts": [
+    {
+      "sku": "SKU-483471",
+      "quantity": 200
+    }
+  ],
+  "orderProducts": [
+    {
+      "sku": "SKU-483471",
+      "quantity": 2
+    }
+  ]
+}

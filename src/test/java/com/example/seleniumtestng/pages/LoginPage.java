@@ -73,7 +73,7 @@ public class LoginPage extends BasePage {
 
     public void waitForLoginSuccess() {
         wait.withTimeout(Duration.ofSeconds(30)).until(driver -> {
-            String url = driver.getCurrentUrl();
+            String url = String.valueOf(driver.getCurrentUrl());
             if (url.contains("/dashboard") || url.contains("/home") || url.contains("/warehouse") || url.contains("/user-setting")) {
                 return true;
             }
@@ -82,7 +82,7 @@ public class LoginPage extends BasePage {
     }
 
     public void waitForLoginFailure() {
-        wait.until(driver -> driver.getCurrentUrl().contains("/login") || isLoginFormVisible());
+        wait.until(driver -> String.valueOf(driver.getCurrentUrl()).contains("/login") || isLoginFormVisible());
     }
 
     public boolean isLoginFormVisible() {

@@ -11,7 +11,10 @@ Automation project for OMS/WMS flows using Java, Selenium WebDriver, Maven, and 
 ├── src/test/resources/config.properties
 └── src/test/java/com/example/seleniumtestng/
     ├── base/
+    ├── clients/
     ├── config/
+    ├── flows/
+    ├── models/
     ├── pages/
     ├── tests/
     └── utils/
@@ -32,6 +35,9 @@ Default URLs and common test values are in:
 ```text
 src/test/resources/config.properties
 ```
+
+Values in `config.properties` can be overridden with environment variables,
+`.env`, or JVM system properties using the same key.
 
 Credentials are read from `.env`, environment variables, or JVM system properties:
 

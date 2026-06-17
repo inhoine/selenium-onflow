@@ -1,4 +1,4 @@
-package com.example.seleniumtestng.utils;
+package com.example.seleniumtestng.models;
 
 import java.util.List;
 

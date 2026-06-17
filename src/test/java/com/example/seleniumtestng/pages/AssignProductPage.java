@@ -41,7 +41,7 @@ public class AssignProductPage extends BasePage {
 
     public void openProductsByUserId(String userId) {
         driver.get(com.example.seleniumtestng.config.ConfigReader.required("OPS_BASE_URL") + "/products?user_id=" + userId);
-        wait.until(driver -> driver.getCurrentUrl().contains("/products"));
+        wait.until(driver -> String.valueOf(driver.getCurrentUrl()).contains("/products"));
         wait.until(driver -> !driver.findElements(By.cssSelector("input")).isEmpty());
     }
 

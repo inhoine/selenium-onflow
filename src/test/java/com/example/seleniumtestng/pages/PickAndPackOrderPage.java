@@ -1,8 +1,8 @@
 package com.example.seleniumtestng.pages;
 
 import com.example.seleniumtestng.config.ConfigReader;
-import com.example.seleniumtestng.utils.PackingOrder;
-import com.example.seleniumtestng.utils.PickupItem;
+import com.example.seleniumtestng.models.PackingOrder;
+import com.example.seleniumtestng.models.PickupItem;
 import com.example.seleniumtestng.utils.ScanTable;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -13,15 +13,9 @@ import org.openqa.selenium.Keys;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 
-@SuppressWarnings("null")
 public class PickAndPackOrderPage extends BasePage {
     private static final long MATERIAL_DELAY_MS = 500;
 
-    private final By addEquipmentBtn = By.xpath("//button[normalize-space()='Thêm thiết bị chứa hàng' or normalize-space()='Them thiet bi chua hang']");
-    private final By equipmentCodeField = By.xpath("//div[contains(.,'Thêm thiết bị mới') or contains(.,'Them thiet bi moi')]//input[contains(@placeholder,'mã thiết bị') or contains(@placeholder,'ma thiet bi')]");
-    private final By equipmentGroupDropdown = By.xpath("//div[normalize-space()='Chọn nhóm thiết bị' or normalize-space()='Chon nhom thiet bi']");
-    private final By equipmentTypeDropdown = By.xpath("//div[normalize-space()='Chọn loại thiết bị' or normalize-space()='Chon loai thiet bi']");
-    private final By submitEquipmentBtn = By.cssSelector("button[type='submit']");
     private final By scanPackingTrolleyField = By.xpath("//input[@placeholder='Quét mã XE/ bảng kê cần đóng gói']");
     private final By receivePackingTrolleyBtn = By.xpath("//button[normalize-space()='Nhận bảng kê' or normalize-space()='Nhan bang ke']");
     private final By scanPickUpField = By.xpath("//input[@placeholder='Quét mã Xe/ Bảng kê/ Rổ']");
@@ -33,22 +27,6 @@ public class PickAndPackOrderPage extends BasePage {
 
     public PickAndPackOrderPage(WebDriver driver) {
         super(driver);
-    }
-
-    public String addEquipment(String equipmentGroupName, String equipmentTypeName) {
-        String equipmentCode = "THIET-BI-" + (System.currentTimeMillis() % 100000);
-        click(addEquipmentBtn);
-        type(equipmentCodeField, equipmentCode);
-        click(equipmentGroupDropdown);
-        jsClick(visible(exactOption(equipmentGroupName)));
-        click(equipmentTypeDropdown);
-        jsClick(visible(exactOption(equipmentTypeName)));
-        click(submitEquipmentBtn);
-        return equipmentCode;
-    }
-
-    public String verifyToastMessage(String message) {
-        return visible(By.xpath("//div[contains(@class,'Toastify__toast-body')]//div[contains(normalize-space(.),'" + message + "')]")).getText();
     }
 
     public boolean verifyToastMessageIfPresent(String message, long timeoutMillis) {
@@ -82,9 +60,9 @@ public class PickAndPackOrderPage extends BasePage {
         click(receivePackingTrolleyBtn);
     }
 
-    public void scanTablePacking() {
+    public void scanTablePacking(String tableCode) {
         driver.get(ConfigReader.required("WMS_BASE_URL") + "/packing");
-        new ScanTable(driver).scan("PACK02");
+        new ScanTable(driver).scan(tableCode);
         visible(scanPickUpField);
     }
 
@@ -93,7 +71,7 @@ public class PickAndPackOrderPage extends BasePage {
         clearAndEnter(input, pickupId);
     }
 
-    public void packBySystemSuggestion(List<PackingOrder> packingOrders, String materialCode) {
+    public int packBySystemSuggestion(List<PackingOrder> packingOrders, String materialCode) {
         Set<String> processedTrackingCodes = new HashSet<>();
         for (PackingOrder order : packingOrders) {
             if (processedTrackingCodes.contains(order.trackingCode())) {
@@ -120,6 +98,7 @@ public class PickAndPackOrderPage extends BasePage {
                 System.out.println("Skip already processed tracking: " + currentTracking);
             }
         }
+        return processedTrackingCodes.size();
     }
 
     public void packOrdersByTrackingCode(List<PackingOrder> packingOrders, String materialCode) {
@@ -331,10 +310,6 @@ public class PickAndPackOrderPage extends BasePage {
 
     private int getQuantityNeedScan(PickupItem item) {
         return item.quantitySold() - item.quantityPick();
-    }
-
-    private By exactOption(String value) {
-        return By.xpath("//*[contains(@class,'-menu')]//*[normalize-space(.)='" + value + "']");
     }
 
     private void sleep(long millis) {

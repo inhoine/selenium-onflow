@@ -1,5 +1,6 @@
 package com.example.seleniumtestng.pages;
 
+import com.example.seleniumtestng.config.ConfigReader;
 import java.util.List;
 import java.util.Set;
 import org.openqa.selenium.By;
@@ -95,7 +96,7 @@ public class ListingProductPage extends BasePage {
             sellButton = waitForSellButton(60000);
         }
         if (sellButton == null) {
-            throw new IllegalStateException("Không tìm thấy nút Đăng bán trên trang listing. URL hiện tại: " + driver.getCurrentUrl());
+            throw new IllegalStateException("Không tìm thấy nút Đăng bán trên trang listing. URL hiện tại: " + String.valueOf(driver.getCurrentUrl()));
         }
         try {
             sellButton.click();
@@ -151,7 +152,12 @@ public class ListingProductPage extends BasePage {
     }
 
     private void waitForListingForm() {
-        waitForSellButton(60000);
+        WebElement sellButton = waitForSellButton(60000);
+        if (sellButton == null) {
+            throw new IllegalStateException("Listing form did not finish loading. URL: " + driver.getCurrentUrl());
+        }
+        wait.until(driver -> !isLoadingVisible());
+        sleep(ConfigReader.requiredInt("LISTING_FORM_STABILIZATION_MS"));
     }
 
     private WebElement waitForSellButton(long timeoutMillis) {

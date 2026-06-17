@@ -30,7 +30,8 @@ public abstract class BaseTest {
             saveScreenshot(result.getMethod().getMethodName());
         }
         if (driver != null) {
-            // driver.quit();
+            driver.quit();
+            driver = null;
         }
     }
 

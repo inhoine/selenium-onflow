@@ -76,8 +76,8 @@ public class CreatePickupOrderPage extends BasePage {
         clickable(createPickUpBtn);
     }
 
-    public void verifyPickUpOrderCreated() {
-        visible(notificationSuccess);
+    public String getPickUpOrderCreatedMessage() {
+        return visible(notificationSuccess).getText().trim();
     }
 
     private By exactOption(String value) {

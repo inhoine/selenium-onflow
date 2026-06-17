@@ -12,7 +12,7 @@ public final class DriverFactory {
     }
 
     public static WebDriver create(String browser) {
-        String normalized = browser == null ? "chrome" : browser.trim().toLowerCase();
+        String normalized = normalizeBrowser(browser);
         WebDriver driver;
         switch (normalized) {
             case "firefox":
@@ -31,5 +31,12 @@ public final class DriverFactory {
         driver.manage().timeouts().implicitlyWait(Duration.ZERO);
         driver.manage().window().maximize();
         return driver;
+    }
+
+    private static String normalizeBrowser(String browser) {
+        if (browser == null || browser.trim().isEmpty()) {
+            return "chrome";
+        }
+        return browser.trim().toLowerCase();
     }
 }

@@ -1,6 +1,6 @@
 package com.example.seleniumtestng.pages;
 
-import com.example.seleniumtestng.utils.POSku;
+import com.example.seleniumtestng.models.POSku;
 import java.util.List;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;

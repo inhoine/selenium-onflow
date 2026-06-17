@@ -2,6 +2,7 @@ package com.example.seleniumtestng.config;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,7 +18,7 @@ public final class ConfigReader {
     static {
         try (InputStream stream = ConfigReader.class.getClassLoader().getResourceAsStream("config.properties")) {
             if (stream != null) {
-                PROPERTIES.load(stream);
+                PROPERTIES.load(new InputStreamReader(stream, StandardCharsets.UTF_8));
             }
         } catch (IOException e) {
             throw new IllegalStateException("Unable to load config.properties", e);
@@ -53,6 +54,15 @@ public final class ConfigReader {
             throw new IllegalStateException("Missing required config value: " + key);
         }
         return value;
+    }
+
+    public static int requiredInt(String key) {
+        String value = required(key);
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            throw new IllegalStateException("Config value must be an integer: " + key + "=" + value, e);
+        }
     }
 
     public static Duration timeout() {

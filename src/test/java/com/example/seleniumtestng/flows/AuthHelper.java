@@ -1,4 +1,4 @@
-package com.example.seleniumtestng.utils;
+package com.example.seleniumtestng.flows;
 
 import com.example.seleniumtestng.config.AccountConfig;
 import com.example.seleniumtestng.pages.LoginPage;
@@ -7,7 +7,6 @@ import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.support.ui.WebDriverWait;
 
-@SuppressWarnings("null")
 public final class AuthHelper {
     private AuthHelper() {
     }

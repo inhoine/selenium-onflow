@@ -7,7 +7,6 @@ import org.testng.Assert;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
-@SuppressWarnings("null")
 public class LoginTest extends BaseTest {
     @DataProvider(name = "loginScenarios")
     public Object[][] loginScenarios() {

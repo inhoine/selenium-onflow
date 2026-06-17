@@ -4,14 +4,13 @@ import com.example.seleniumtestng.base.BaseTest;
 import com.example.seleniumtestng.pages.AssignProductPage;
 import com.example.seleniumtestng.pages.ListingProductPage;
 import com.example.seleniumtestng.pages.ProductPage;
-import com.example.seleniumtestng.utils.AuthHelper;
+import com.example.seleniumtestng.flows.AuthHelper;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.testng.Assert;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
-@SuppressWarnings("null")
 public class ProductTest extends BaseTest {
     private static final String PRODUCT_LIST_PATH = "/products?page=1&page_size=50&return_type=list_linked_platform&status_group=all&type_filter=all";
     private static final String REQUIRED_INFO_ERROR = "Vui lòng điền đầy đủ thông tin";

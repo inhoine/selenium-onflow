@@ -1,6 +1,9 @@
-package com.example.seleniumtestng.utils;
+package com.example.seleniumtestng.clients;
 
 import com.example.seleniumtestng.config.ConfigReader;
+import com.example.seleniumtestng.models.POSku;
+import com.example.seleniumtestng.models.PackingOrder;
+import com.example.seleniumtestng.models.PickupItem;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
@@ -57,7 +60,7 @@ public class WmsApiClient {
         return result;
     }
 
-    public void updatePutaway(String inboundCode, String token) {
+    public int updatePutaway(String inboundCode, String token) {
         JsonNode todo = request("GET", "/v1/putaway/todo?page_size=100&page=1&stock_level=A", token, null, false);
         int updated = 0;
         for (JsonNode task : todo.path("data")) {
@@ -75,6 +78,7 @@ public class WmsApiClient {
         if (updated == 0) {
             throw new IllegalStateException("No putaway task found for PO " + inboundCode);
         }
+        return updated;
     }
 
     public List<PickupItem> getPickupDetail(String pickupId, String token) {
