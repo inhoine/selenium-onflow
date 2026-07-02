@@ -58,14 +58,7 @@ public class InboundProductTest extends BaseTest {
         Assert.assertFalse(poSkus.isEmpty(), "Expected SKU data for inbound " + inboundCode);
         assertInboundProductsCreated(inboundProducts, poSkus);
         for (POSku sku : poSkus) {
-            inboundWms.scanBox(sku.boxCode());
-            inboundWms.waitProductActionReady();
-            inboundWms.inspectProduct();
-            inboundWms.inputGoodQuantity(sku.quantityInbound());
-            inboundWms.inputBarcode();
-            inboundWms.inputBatchLotIfPresent();
-            inboundWms.inputProductDimensions(sku);
-            inboundWms.confirmInspect();
+            inspectInboundQuantities(inboundWms, sku);
         }
 
         int putawayTasksUpdated = wmsApiClient.updatePutaway(inboundCode, token);
@@ -104,5 +97,71 @@ public class InboundProductTest extends BaseTest {
                     expected.getQuantity(),
                     "Unexpected inbound quantity for SKU " + expected.getSku());
         }
+    }
+
+    private void inspectInboundQuantities(InboundProductWmsPage inboundWms, POSku sku) {
+        int[] quantities = splitQuantity(sku.quantityInbound(), InspectionQuantityType.values().length);
+        InspectionQuantityType[] types = InspectionQuantityType.values();
+
+        for (int index = 0; index < types.length; index++) {
+            int quantity = quantities[index];
+            if (quantity <= 0) {
+                continue;
+            }
+
+            inboundWms.scanBox(sku.boxCode());
+            inboundWms.waitProductActionReady();
+            inboundWms.inspectProduct();
+            inputInspectionQuantity(inboundWms, types[index], quantity);
+            inboundWms.inputBarcode();
+            inboundWms.inputBatchLotIfPresent();
+            inboundWms.inputProductDimensions(sku);
+            inboundWms.confirmInspect();
+        }
+    }
+
+    private int[] splitQuantity(int totalQuantity, int parts) {
+        int[] quantities = new int[parts];
+        int baseQuantity = totalQuantity / parts;
+        int remainder = totalQuantity % parts;
+
+        for (int index = 0; index < parts; index++) {
+            quantities[index] = baseQuantity + (index < remainder ? 1 : 0);
+        }
+
+        return quantities;
+    }
+
+    private void inputInspectionQuantity(
+            InboundProductWmsPage inboundWms,
+            InspectionQuantityType type,
+            int quantity) {
+        switch (type) {
+            case GOOD:
+                inboundWms.inputGoodQuantity(quantity);
+                break;
+            case DAMAGED_TYPE_1:
+                inboundWms.inputDamagedType1Quantity(quantity);
+                break;
+            case DAMAGED_TYPE_2:
+                inboundWms.inputDamagedType2Quantity(quantity);
+                break;
+            case DAMAGED_TYPE_3:
+                inboundWms.inputDamagedType3Quantity(quantity);
+                break;
+            case LOST:
+                inboundWms.inputLostQuantity(quantity);
+                break;
+            default:
+                throw new IllegalArgumentException("Unsupported inspection quantity type: " + type);
+        }
+    }
+
+    private enum InspectionQuantityType {
+        GOOD,
+        DAMAGED_TYPE_1,
+        DAMAGED_TYPE_2,
+        DAMAGED_TYPE_3,
+        LOST
     }
 }

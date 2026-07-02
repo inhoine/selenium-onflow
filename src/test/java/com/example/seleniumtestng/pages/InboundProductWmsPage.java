@@ -12,6 +12,10 @@ public class InboundProductWmsPage extends BasePage {
     private final By scanBoxField = By.xpath("//input[contains(@placeholder,'kiện') or contains(@placeholder,'kien')]");
     private final By selectProductBtn = By.xpath("//button[i[contains(@class,'ri-more-fill')]]");
     private final By goodQtyField = By.cssSelector("input[name='quantity_goods_normal']");
+    private final By lostQtyField = By.cssSelector("input[name='quantity_goods_lost']");
+    private final By damagedType1QtyField = By.cssSelector("input[name='quantity_goods_damaged']");
+    private final By damagedType2QtyField = By.cssSelector("input[name='quantity_goods_damaged_2']");
+    private final By damagedType3QtyField = By.cssSelector("input[name='quantity_goods_damaged_3']");
     private final By barcodeField = By.cssSelector("input[name='manufacturer_barcode']");
     private final By batchLotField = By.cssSelector("input[name='batch_lot_code']");
     private final By lengthField = By.cssSelector("input[name='goods_d']");
@@ -52,8 +56,24 @@ public class InboundProductWmsPage extends BasePage {
         type(goodQtyField, String.valueOf(quantity));
     }
 
+    public void inputLostQuantity(int quantity) {
+        type(lostQtyField, String.valueOf(quantity));
+    }
+
+    public void inputDamagedType1Quantity(int quantity) {
+        type(damagedType1QtyField, String.valueOf(quantity));
+    }
+
+    public void inputDamagedType2Quantity(int quantity) {
+        type(damagedType2QtyField, String.valueOf(quantity));
+    }
+
+    public void inputDamagedType3Quantity(int quantity) {
+        type(damagedType3QtyField, String.valueOf(quantity));
+    }
+
     public void inputBarcode() {
-        type(barcodeField, "AUTO" + System.currentTimeMillis());
+        type(barcodeField, "AUTO" + System.nanoTime());
     }
 
     public void inputBatchLotIfPresent() {

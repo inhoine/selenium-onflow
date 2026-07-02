@@ -12,10 +12,25 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 public class WmsApiClient {
+    private static final List<PutawayLocationGroup> PUTAWAY_LOCATION_GROUPS = Arrays.asList(
+            new PutawayLocationGroup("A", Arrays.asList("A-01-02-005", "A-01-02-001", "CHU-A-1", "BIN-03-CHUA")),
+            new PutawayLocationGroup("D1", Arrays.asList("NANO-02", "A26-NT-04", "HU-1-01", "THANH-CHUA-3", "FC1-DA-01-7-011", "FC1-DA-01-7-012", "FC1-DA-01-7-014")),
+            new PutawayLocationGroup("D2", Arrays.asList(
+                    "FC1-DA-01-3-200",
+                    "FC1-DA-01-3-201",
+                    "FC1-DA-01-3-202",
+                    "FC1-DA-01-3-203")),
+            new PutawayLocationGroup("D3", Arrays.asList(
+                    "FC1-DA-01-3-300",
+                    "FC1-DA-01-3-301",
+                    "FC1-DA-01-3-302",
+                    "FC1-DA-01-3-303")));
+
     private final HttpClient client = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.ALWAYS)
             .build();
@@ -61,24 +76,49 @@ public class WmsApiClient {
     }
 
     public int updatePutaway(String inboundCode, String token) {
-        JsonNode todo = request("GET", "/v1/putaway/todo?page_size=100&page=1&stock_level=A", token, null, false);
         int updated = 0;
-        for (JsonNode task : todo.path("data")) {
-            if (!inboundCode.equals(task.path("shipment_id").path("shipment_po").asText())) {
-                continue;
+        for (PutawayLocationGroup locationGroup : PUTAWAY_LOCATION_GROUPS) {
+            String stockLevel = locationGroup.stockLevel;
+            JsonNode todo = request("GET", "/v1/putaway/todo?page_size=100&page=1&stock_level=" + stockLevel, token, null, false);
+            for (JsonNode task : todo.path("data")) {
+                if (!inboundCode.equals(task.path("shipment_id").path("shipment_po").asText())) {
+                    continue;
+                }
+                putawayTaskWithFallbackLocations(task, locationGroup.locationCodes, token);
+                updated++;
             }
-            String body = "{"
-                    + "\"dr_id\":" + task.path("dr_id").asLong() + ","
-                    + "\"location_code\":\"HCM-01-01\","
-                    + "\"quantity_putaway\":" + task.path("quantity").asInt()
-                    + "}";
-            request("POST", "/v1/putaway/update?", token, body, false);
-            updated++;
         }
         if (updated == 0) {
             throw new IllegalStateException("No putaway task found for PO " + inboundCode);
         }
         return updated;
+    }
+
+    private void putawayTaskWithFallbackLocations(JsonNode task, List<String> locationCodes, String token) {
+        RuntimeException lastFailure = null;
+        for (String locationCode : locationCodes) {
+            String body = "{"
+                    + "\"dr_id\":" + task.path("dr_id").asLong() + ","
+                    + "\"location_code\":\"" + locationCode + "\","
+                    + "\"quantity_putaway\":" + task.path("quantity").asInt()
+                    + "}";
+            try {
+                request("POST", "/v1/putaway/update?", token, body, false);
+                return;
+            } catch (RuntimeException e) {
+                lastFailure = e;
+                System.out.println("Putaway failed for dr_id="
+                        + task.path("dr_id").asLong()
+                        + ", stock_level=" + task.path("stock_level").asText()
+                        + ", location_code=" + locationCode
+                        + ". Trying next location if available. Error: " + e.getMessage());
+            }
+        }
+
+        throw new IllegalStateException("Unable to putaway dr_id="
+                + task.path("dr_id").asLong()
+                + ", stock_level=" + task.path("stock_level").asText()
+                + " to any configured location: " + locationCodes, lastFailure);
     }
 
     public List<PickupItem> getPickupDetail(String pickupId, String token) {
@@ -244,5 +284,15 @@ public class WmsApiClient {
             values.add(item);
         }
         return values;
+    }
+
+    private static final class PutawayLocationGroup {
+        private final String stockLevel;
+        private final List<String> locationCodes;
+
+        private PutawayLocationGroup(String stockLevel, List<String> locationCodes) {
+            this.stockLevel = stockLevel;
+            this.locationCodes = locationCodes;
+        }
     }
 }

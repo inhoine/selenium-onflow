@@ -36,17 +36,17 @@ public class CreateOrderTest extends BaseTest {
         }
         System.out.println("Tracking codes sent to WMS pickup modal: " + String.join(",", trackingCodes));
 
-        // driver.get(url("WMS", "/login"));
-        // AuthHelper.loginWms(driver);
-        // driver.get(url("WMS", "/pickup-order"));
+        driver.get(url("WMS", "/login"));
+        AuthHelper.loginWms(driver);
+        driver.get(url("WMS", "/pickup-order"));
 
-        // CreatePickupOrderPage pickupOrderPage = new CreatePickupOrderPage(driver);
-        // pickupOrderPage.selectPickUpType(ConfigReader.required("CREATE_ORDER_PICKUP_TYPE"));
-        // pickupOrderPage.selectPickUpStrategy(ConfigReader.required("CREATE_ORDER_PICKUP_STRATEGY"));
-        // pickupOrderPage.selectCustomerWms(ConfigReader.required("CREATE_ORDER_WMS_CUSTOMER"));
-        // pickupOrderPage.addOrdersCustomize(trackingCodes);
-        // String successMessage = pickupOrderPage.getPickUpOrderCreatedMessage();
-        // Assert.assertFalse(successMessage.isBlank(), "Pickup order success message is blank");
+        CreatePickupOrderPage pickupOrderPage = new CreatePickupOrderPage(driver);
+        pickupOrderPage.selectPickUpType(ConfigReader.required("CREATE_ORDER_PICKUP_TYPE"));
+        pickupOrderPage.selectPickUpStrategy(ConfigReader.required("CREATE_ORDER_PICKUP_STRATEGY"));
+        pickupOrderPage.selectCustomerWms(ConfigReader.required("CREATE_ORDER_WMS_CUSTOMER"));
+        pickupOrderPage.addOrdersCustomize(trackingCodes);
+        String successMessage = pickupOrderPage.getPickUpOrderCreatedMessage();
+        Assert.assertFalse(successMessage.isBlank(), "Pickup order success message is blank");
     }
 
     private CreatedOrder createB2cOrder(int orderIndex, List<OrderProductData> products) {

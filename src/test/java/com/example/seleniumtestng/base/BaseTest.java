@@ -24,16 +24,16 @@ public abstract class BaseTest {
         driver = DriverFactory.create(browser);
     }
 
-    @AfterMethod(alwaysRun = true)
-    public void tearDown(ITestResult result) {
-        if (driver != null && !result.isSuccess()) {
-            saveScreenshot(result.getMethod().getMethodName());
-        }
-        if (driver != null) {
-            driver.quit();
-            driver = null;
-        }
-    }
+    // @AfterMethod(alwaysRun = true)
+    // public void tearDown(ITestResult result) {
+    //     if (driver != null && !result.isSuccess()) {
+    //         saveScreenshot(result.getMethod().getMethodName());
+    //     }
+    //     if (driver != null) {
+    //         driver.quit();
+    //         driver = null;
+    //     }
+    // }
 
     protected String url(String app, String path) {
         String key = app.toUpperCase() + "_BASE_URL";
