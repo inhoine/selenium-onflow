@@ -1,5 +1,6 @@
 package com.example.seleniumtestng.pages;
 
+import java.text.Normalizer;
 import java.util.List;
 import java.util.StringJoiner;
 import org.openqa.selenium.By;
@@ -10,8 +11,9 @@ import org.openqa.selenium.WebElement;
 import org.openqa.selenium.interactions.Actions;
 
 public class CreatePickupOrderPage extends BasePage {
-    private final By pickUpTypeField = By.xpath("//div[normalize-space()='Chọn loại bảng kê' or normalize-space()='Chon loai bang ke']");
-    private final By pickUpStrategyField = By.xpath("//div[normalize-space()='Chọn loại chiến lược' or normalize-space()='Chon loai chien luoc']");
+    private final By pickUpTypeField = By.xpath("//*[normalize-space()='Chọn loại bảng kê' or normalize-space()='Chon loai bang ke']/ancestor::div[contains(@class,'-control')][1]");
+    private final By pickUpStrategyField = By.xpath("//*[normalize-space()='Chọn loại chiến lược' or normalize-space()='Chon loai chien luoc']/ancestor::div[contains(@class,'-control')][1]");
+    private final By orderSizeField = By.xpath("//*[normalize-space()='Chọn kích thước đơn hàng' or normalize-space()='Chon kich thuoc don hang']/ancestor::div[contains(@class,'-control')][1]");
     private final By chooseCustomerField = By.xpath("//div[contains(.,'Chọn khách hàng') or contains(.,'Chon khach hang')]/ancestor::div[contains(@class,'-control')]");
     private final By chooseCustomerInput = By.xpath("//div[contains(.,'Chọn khách hàng') or contains(.,'Chon khach hang')]/following::input[1]");
     private final By customizeBtn = By.xpath("//button[normalize-space()='Tuỳ chỉnh' or normalize-space()='Tùy chỉnh' or normalize-space()='Tuy chinh']");
@@ -32,14 +34,25 @@ public class CreatePickupOrderPage extends BasePage {
         super(driver);
     }
 
+    public void configureRequiredSetup(String pickupType, String pickupStrategy, String orderSize) {
+        selectPickUpType(pickupType);
+        if (usesOrderSize(pickupType) || isVisible(orderSizeField, 2000)) {
+            selectOrderSize(requireValue(orderSize, "CREATE_ORDER_ORDER_SIZE", pickupType));
+            return;
+        }
+        selectPickUpStrategy(requireValue(pickupStrategy, "CREATE_ORDER_PICKUP_STRATEGY", pickupType));
+    }
+
     public void selectPickUpType(String typeName) {
-        click(pickUpTypeField);
-        jsClick(visible(exactOption(typeName)));
+        selectDropdownOption(pickUpTypeField, typeName);
     }
 
     public void selectPickUpStrategy(String strategyName) {
-        click(pickUpStrategyField);
-        jsClick(visible(exactOption(strategyName)));
+        selectDropdownOption(pickUpStrategyField, strategyName);
+    }
+
+    public void selectOrderSize(String orderSize) {
+        selectDropdownOption(orderSizeField, orderSize);
     }
 
     public void selectCustomerWms(String customerName) {
@@ -81,11 +94,25 @@ public class CreatePickupOrderPage extends BasePage {
     }
 
     private By exactOption(String value) {
-        return By.xpath("//*[contains(@class,'-menu')]//*[normalize-space(.)='" + value + "']");
+        return By.xpath("//*[contains(@class,'-menu') or @role='listbox']//*[normalize-space(.)=" + xpathLiteral(value) + "]");
     }
 
     private By optionContains(String value) {
-        return By.xpath("//*[contains(@class,'-menu')]//*[contains(normalize-space(.),'" + value + "')]");
+        return By.xpath("//*[contains(@class,'-menu') or @role='listbox']//*[contains(normalize-space(.)," + xpathLiteral(value) + ")]");
+    }
+
+    private void selectDropdownOption(By controlLocator, String optionName) {
+        WebElement control = clickable(controlLocator);
+        clickDropdown(control);
+        WebElement option = findVisible(exactOption(optionName), 2000);
+        if (option == null) {
+            driver.switchTo().activeElement().sendKeys(optionName);
+            option = findVisible(optionContains(optionName), 5000);
+        }
+        if (option == null) {
+            throw new IllegalStateException("Không tìm thấy option WMS pickup: " + optionName);
+        }
+        jsClick(option);
     }
 
     private void selectOrderListConditionIfNeeded() {
@@ -184,5 +211,49 @@ public class CreatePickupOrderPage extends BasePage {
         } catch (RuntimeException e) {
             jsClick(dropdown);
         }
+    }
+
+    private boolean usesOrderSize(String pickupType) {
+        String normalized = removeAccent(pickupType).toLowerCase();
+        return normalized.contains("b2c sso") || normalized.contains("b2c mso");
+    }
+
+    private String requireValue(String value, String configKey, String pickupType) {
+        if (value != null && !value.trim().isEmpty()) {
+            return value.trim();
+        }
+        throw new IllegalStateException(configKey + " is required for pickup type: " + pickupType);
+    }
+
+    private String removeAccent(String value) {
+        if (value == null) {
+            return "";
+        }
+        return Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .replace('đ', 'd')
+                .replace('Đ', 'D');
+    }
+
+    private String xpathLiteral(String value) {
+        if (!value.contains("'")) {
+            return "'" + value + "'";
+        }
+        if (!value.contains("\"")) {
+            return "\"" + value + "\"";
+        }
+        StringBuilder builder = new StringBuilder("concat(");
+        for (int index = 0; index < value.length(); index++) {
+            if (index > 0) {
+                builder.append(",");
+            }
+            char character = value.charAt(index);
+            if (character == '\'') {
+                builder.append("\"'\"");
+            } else {
+                builder.append("'").append(character).append("'");
+            }
+        }
+        return builder.append(")").toString();
     }
 }

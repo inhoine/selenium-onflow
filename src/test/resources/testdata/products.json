@@ -505,7 +505,11 @@
   "orderProducts": [
     {
       "sku": "SKU-101615",
-      "quantity": 5
+      "quantity": 1
+    },
+    {
+      "sku": "BATCH_395879",
+      "quantity": 1
     }
   ]
 }

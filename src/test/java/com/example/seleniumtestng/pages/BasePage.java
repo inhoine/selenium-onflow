@@ -40,6 +40,30 @@ public abstract class BasePage {
         ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView({block:'center'}); arguments[0].click();", element);
     }
 
+    protected void setInputValue(WebElement element, String value) {
+        ((JavascriptExecutor) driver).executeScript(
+                "arguments[0].scrollIntoView({block:'center'});"
+                        + "const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;"
+                        + "setter.call(arguments[0], arguments[1]);"
+                        + "arguments[0].dispatchEvent(new Event('input', { bubbles: true }));"
+                        + "arguments[0].dispatchEvent(new Event('change', { bubbles: true }));"
+                        + "arguments[0].dispatchEvent(new Event('blur', { bubbles: true }));",
+                element,
+                value);
+    }
+
+    protected void setFlatpickrDate(WebElement element, String value) {
+        ((JavascriptExecutor) driver).executeScript(
+                "arguments[0].scrollIntoView({block:'center'});"
+                        + "if (arguments[0]._flatpickr) {"
+                        + "  arguments[0]._flatpickr.set('minDate', null);"
+                        + "  arguments[0]._flatpickr.set('maxDate', null);"
+                        + "  arguments[0]._flatpickr.setDate(arguments[1], true, 'd-m-Y');"
+                        + "}",
+                element,
+                value);
+    }
+
     protected void type(By locator, String value) {
         WebElement element = visible(locator);
         element.clear();
@@ -55,6 +79,8 @@ public abstract class BasePage {
     }
 
     protected WebDriverWait shortWait(long millis) {
-        return new WebDriverWait(driver, Duration.ofMillis(millis));
+        WebDriverWait shortWait = new WebDriverWait(driver, Duration.ofMillis(millis));
+        shortWait.pollingEvery(Duration.ofMillis(50));
+        return shortWait;
     }
 }
