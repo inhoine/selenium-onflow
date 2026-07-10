@@ -87,11 +87,11 @@ public class CreateOrderOmsPage extends BasePage {
     }
 
     public void verifyCreatedOrder(String orderNumber) {
-        visible(By.xpath("//a[contains(@id,'partner_tracking_code') and normalize-space()='" + orderNumber + "']"));
+        visible(By.xpath("//a[contains(@id,'partner_tracking_code') and normalize-space()=" + xpathText(orderNumber) + "]"));
     }
 
     public String getTrackingCodeByOrderNumber(String orderNumber) {
-        WebElement trackingCode = visible(By.xpath("//a[normalize-space()='" + orderNumber + "']/ancestor::div[contains(@class,'flex-column')]//p[contains(@id,'tracking_code')]"));
+        WebElement trackingCode = visible(By.xpath("//a[normalize-space()=" + xpathText(orderNumber) + "]/ancestor::div[contains(@class,'flex-column')]//p[contains(@id,'tracking_code')]"));
         return trackingCode.getText().trim();
     }
 
@@ -105,7 +105,7 @@ public class CreateOrderOmsPage extends BasePage {
     }
 
     private By optionContains(String value) {
-        return By.xpath("//*[contains(@class,'-menu')]//*[contains(normalize-space(.),'" + value + "')]");
+        return By.xpath("//*[contains(@class,'-menu')]//*[contains(normalize-space(.)," + xpathText(value) + ")]");
     }
 
     private WebElement last(By locator) {

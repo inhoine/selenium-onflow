@@ -32,6 +32,11 @@ public final class AuthHelper {
     }
 
     public static String loginWms(WebDriver driver) {
+        loginWmsUi(driver);
+        return getWmsToken(driver);
+    }
+
+    public static void loginWmsUi(WebDriver driver) {
         AccountConfig.Credentials credentials = AccountConfig.wms();
         LoginPage loginPage = new LoginPage(driver);
         loginPage.waitForLoginForm();
@@ -39,13 +44,34 @@ public final class AuthHelper {
         loginPage.continueLoginIfNeeded();
         boolean selectedFc = loginPage.selectFcIfPresent(8000);
         System.out.println(selectedFc ? "Selected WMS FC" : "WMS FC selector not shown; continuing");
-        return getWmsToken(driver);
+        loginPage.waitForLoginSuccess();
     }
 
     public static String getWmsToken(WebDriver driver) {
         return new WebDriverWait(driver, Duration.ofSeconds(30))
                 .until(d -> {
-                    Object token = ((JavascriptExecutor) d).executeScript("return localStorage.getItem('token');");
+                    Object token = ((JavascriptExecutor) d).executeScript(
+                            "const preferred = ['token', 'access_token', 'accessToken', 'authToken', 'id_token', 'jwt'];"
+                                    + "for (const storage of [localStorage, sessionStorage]) {"
+                                    + "  for (const key of preferred) {"
+                                    + "    const value = storage.getItem(key);"
+                                    + "    if (value) return value;"
+                                    + "  }"
+                                    + "  for (let i = 0; i < storage.length; i++) {"
+                                    + "    const key = storage.key(i);"
+                                    + "    const value = key ? storage.getItem(key) : null;"
+                                    + "    if (value && key && /token|jwt/i.test(key)) {"
+                                    + "      return value;"
+                                    + "    }"
+                                    + "    if (value) {"
+                                    + "      const jwt = value.match(/eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+/);"
+                                    + "      if (jwt) return jwt[0];"
+                                    + "      const bearer = value.match(/Bearer\\s+(eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+)/i);"
+                                    + "      if (bearer) return bearer[1];"
+                                    + "    }"
+                                    + "  }"
+                                    + "}"
+                                    + "return null;");
                     String normalized = normalizeToken(token);
                     return normalized.isBlank() ? null : normalized;
                 });

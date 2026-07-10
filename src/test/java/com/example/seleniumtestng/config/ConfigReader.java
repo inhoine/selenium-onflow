@@ -65,6 +65,14 @@ public final class ConfigReader {
         }
     }
 
+    public static boolean getBoolean(String key, boolean defaultValue) {
+        String value = get(key);
+        if (!hasText(value)) {
+            return defaultValue;
+        }
+        return Boolean.parseBoolean(value.trim());
+    }
+
     public static Duration timeout() {
         return Duration.ofMillis(Long.parseLong(getOrDefault("TEST_TIMEOUT", "15000")));
     }

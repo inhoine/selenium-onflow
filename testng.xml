@@ -31,4 +31,10 @@
             <class name="com.example.seleniumtestng.tests.PickPackTest"/>
         </classes>
     </test>
+
+    <test name="Packing Campaign">
+        <classes>
+            <class name="com.example.seleniumtestng.tests.PackingCampaignTest"/>
+        </classes>
+    </test>
 </suite>

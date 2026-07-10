@@ -104,7 +104,7 @@ public class ProductPage extends BasePage {
     }
 
     public void verifyProductDisplayed(String sku) {
-        By productLocator = By.xpath("//p[@title='" + sku + "'] | //*[normalize-space()='" + sku + "']");
+        By productLocator = By.xpath("//p[@title=" + xpathText(sku) + "] | //*[normalize-space()=" + xpathText(sku) + "]");
         wait.until(ExpectedConditions.visibilityOfElementLocated(productLocator));
     }
 

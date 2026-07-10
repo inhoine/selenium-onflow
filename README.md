@@ -50,6 +50,14 @@ WMS_EMAIL=your-wms-email@example.com
 WMS_PASSWORD=your-wms-password
 ```
 
+Useful flow toggles:
+
+```env
+KEEP_BROWSER_OPEN=false
+INBOUND_CREATE_NEW=true
+CREATE_ORDER_CREATE_PICKUP=true
+```
+
 ## Commands
 
 Compile test sources:

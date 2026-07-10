@@ -59,7 +59,7 @@ public class CreateInboundProductPage extends BasePage {
         jsClick(dropdown);
         WebElement input = dropdown.findElement(By.cssSelector("input"));
         input.sendKeys(productKeyword);
-        visible(By.xpath("//*[contains(@class,'-menu')]//*[contains(normalize-space(.),'" + productKeyword + "')]"));
+        visible(By.xpath("//*[contains(@class,'-menu')]//*[contains(normalize-space(.)," + xpathText(productKeyword) + ")]"));
         input.sendKeys(Keys.ENTER);
 
         List<WebElement> qtyInputs = all(By.xpath("//input[contains(@name,'productQty')]"));
@@ -102,7 +102,7 @@ public class CreateInboundProductPage extends BasePage {
         click(field);
         WebElement input = visible(inputLocator);
         input.sendKeys(keyword);
-        visible(By.xpath("//*[contains(@class,'-menu')]//*[contains(normalize-space(.),'" + keyword + "')]"));
+        visible(By.xpath("//*[contains(@class,'-menu')]//*[contains(normalize-space(.)," + xpathText(keyword) + ")]"));
         input.sendKeys(Keys.ENTER);
     }
 

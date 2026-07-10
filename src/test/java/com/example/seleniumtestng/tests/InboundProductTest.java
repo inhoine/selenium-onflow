@@ -4,9 +4,9 @@ import com.example.seleniumtestng.base.BaseTest;
 import com.example.seleniumtestng.clients.WmsApiClient;
 import com.example.seleniumtestng.config.ConfigReader;
 import com.example.seleniumtestng.flows.AuthHelper;
+import com.example.seleniumtestng.flows.InboundCreationFlow;
 import com.example.seleniumtestng.models.InboundProductData;
 import com.example.seleniumtestng.models.POSku;
-import com.example.seleniumtestng.pages.CreateInboundProductPage;
 import com.example.seleniumtestng.pages.InboundProductWmsPage;
 import com.example.seleniumtestng.pages.InboundProductWmsPage.ScannedInboundProduct;
 import com.example.seleniumtestng.utils.ScanTable;
@@ -17,37 +17,19 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
 public class InboundProductTest extends BaseTest {
     @Test
     public void createAndInspectInboundProduct() {
-        List<InboundProductData> inboundProducts = TestDataReader.inboundProducts();
-
-        // driver.get(url("OMS", "/login"));
-        // AuthHelper.loginOms(driver);
-        // new org.openqa.selenium.support.ui.WebDriverWait(driver, ConfigReader.timeout())
-        //         .until(ExpectedConditions.urlContains("/dashboard"));
-
-        // driver.get(url("OMS", "/list-shipment-inbound?"));
-        // CreateInboundProductPage createInbound = new CreateInboundProductPage(driver);
-        // createInbound.openCreateInboundForm();
-        // createInbound.selectWarehouse(ConfigReader.required("INBOUND_WAREHOUSE_CODE"));
-        // createInbound.selectSupplier(ConfigReader.required("INBOUND_SUPPLIER"));
-        // createInbound.inputReference();
-        // addInboundProducts(createInbound, inboundProducts);
-        // createInbound.confirmItems();
-        // createInbound.inputProductDimensions(
-        //         ConfigReader.requiredInt("INBOUND_LENGTH"),
-        //         ConfigReader.requiredInt("INBOUND_WIDTH"),
-        //         ConfigReader.requiredInt("INBOUND_HEIGHT"));
-        // createInbound.confirmCreateInbound();
-
-        // String inboundCode = createInbound.getInboundCode();
-        // Assert.assertTrue(inboundCode.matches("NHIV\\d+"), "Invalid inbound code: " + inboundCode);
-        String inboundCode = ConfigReader.getOrDefault("INBOUND_PO_CODE", "NHIV2941280787");
+        boolean createNewInbound = ConfigReader.getBoolean("INBOUND_CREATE_NEW", true);
+        List<InboundProductData> inboundProducts = createNewInbound
+                ? TestDataReader.inboundProducts()
+                : Collections.emptyList();
+        String inboundCode = createNewInbound
+                ? new InboundCreationFlow(driver).createApprovedInbound(inboundProducts)
+                : ConfigReader.required("INBOUND_PO_CODE");
 
         driver.get(url("WMS", "/login"));
         String token = AuthHelper.loginWms(driver);
@@ -77,10 +59,7 @@ public class InboundProductTest extends BaseTest {
                     + ", boxes="
                     + summarizeBoxCodes(boxCodes));
 
-            driver.get(url("WMS", "/inspection"));
-            new ScanTable(driver).scanIfPresent(ConfigReader.required("INBOUND_PACKING_TABLE_CODE"));
-            inboundWms = new InboundProductWmsPage(driver);
-            inboundWms.scanPo(inboundCode);
+            inboundWms = openInspectionAndScanPo(inboundCode);
 
             for (String boxCode : boxCodes) {
                 Map<String, POSku> boxProductMetadata = productMetadataForBox(
@@ -95,7 +74,7 @@ public class InboundProductTest extends BaseTest {
                 while (inspectionLimit <= 0 || inspectedProducts < inspectionLimit) {
                     BoxInspectionResult result;
                     try {
-                        result = inspectNextProductInBox(
+                        result = scanBoxAndInspectNextProduct(
                                 inboundWms,
                                 boxCode,
                                 boxProductMetadata,
@@ -108,10 +87,7 @@ public class InboundProductTest extends BaseTest {
                                 + boxCode
                                 + " after "
                                 + e.getClass().getSimpleName());
-                        driver.get(url("WMS", "/inspection"));
-                        new ScanTable(driver).scanIfPresent(ConfigReader.required("INBOUND_PACKING_TABLE_CODE"));
-                        inboundWms = new InboundProductWmsPage(driver);
-                        inboundWms.scanPo(inboundCode);
+                        inboundWms = openInspectionAndScanPo(inboundCode);
                         refreshedForBox = true;
                         continue;
                     }
@@ -204,7 +180,15 @@ public class InboundProductTest extends BaseTest {
         return remainingBoxCodes;
     }
 
-    private BoxInspectionResult inspectNextProductInBox(
+    private InboundProductWmsPage openInspectionAndScanPo(String inboundCode) {
+        driver.get(url("WMS", "/inspection"));
+        new ScanTable(driver).scanIfPresent(ConfigReader.required("INBOUND_PACKING_TABLE_CODE"));
+        InboundProductWmsPage inboundWms = new InboundProductWmsPage(driver);
+        inboundWms.scanPo(inboundCode);
+        return inboundWms;
+    }
+
+    private BoxInspectionResult scanBoxAndInspectNextProduct(
             InboundProductWmsPage inboundWms,
             String boxCode,
             Map<String, POSku> productMetadata,
@@ -229,19 +213,6 @@ public class InboundProductTest extends BaseTest {
             return BoxInspectionResult.stopAfterInspect(1, 0);
         }
         return BoxInspectionResult.continueBox(1, 0);
-    }
-
-    private void addInboundProducts(
-            CreateInboundProductPage createInbound,
-            List<InboundProductData> products) {
-        createInbound.clickAddProduct();
-        for (int index = 0; index < products.size(); index++) {
-            if (index > 0) {
-                createInbound.addNewProductRow();
-            }
-            InboundProductData product = products.get(index);
-            createInbound.addProductToInbound(product.getSku(), product.getQuantity());
-        }
     }
 
     private void markReceivedIfAllowed(WmsApiClient wmsApiClient, String inboundCode, String token) {

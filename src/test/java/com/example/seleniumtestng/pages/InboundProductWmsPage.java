@@ -16,7 +16,12 @@ import org.openqa.selenium.support.ui.ExpectedConditions;
 
 public class InboundProductWmsPage extends BasePage {
     private final By scanPoField = By.xpath("//input[contains(@placeholder,'PO')]");
-    private final By scanBoxField = By.xpath("//input[contains(@placeholder,'kiện') or contains(@placeholder,'kien')]");
+    private final By scanBoxField = By.xpath("//input["
+            + "contains(@placeholder,'Kiện') "
+            + "or contains(@placeholder,'kiện') "
+            + "or contains(@placeholder,'Kien') "
+            + "or contains(@placeholder,'kien') "
+            + "or contains(@placeholder,'Barcode')]");
     private final By selectProductBtn = By.xpath("//button[i[contains(@class,'ri-more') or contains(@class,'ellipsis')]"
             + " or contains(normalize-space(.),'...') or @aria-haspopup='menu' or @aria-expanded]");
     private final By goodQtyField = By.xpath(

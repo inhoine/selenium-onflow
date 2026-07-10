@@ -39,7 +39,7 @@ public class EquipmentPage extends BasePage {
     }
 
     public String waitForToast(String message) {
-        By toast = By.xpath("//div[contains(@class,'Toastify__toast-body')]//div[contains(normalize-space(.),'" + message + "')]");
+        By toast = By.xpath("//div[contains(@class,'Toastify__toast-body')]//div[contains(normalize-space(.)," + xpathText(message) + ")]");
         return visible(toast).getText().trim();
     }
 
@@ -69,14 +69,14 @@ public class EquipmentPage extends BasePage {
     }
 
     private WebElement findOption(String value, boolean exact) {
-        String expected = normalize(value);
+        String expected = normalizeForMatch(value);
         List<WebElement> options = all(By.xpath("//*[contains(@class,'-menu')]//*[contains(@class,'-option') or @role='option']"));
         for (WebElement option : options) {
             try {
                 if (!option.isDisplayed()) {
                     continue;
                 }
-                String actual = normalize(option.getText());
+                String actual = normalizeForMatch(option.getText());
                 if (exact ? actual.equals(expected) : actual.contains(expected)) {
                     return option;
                 }

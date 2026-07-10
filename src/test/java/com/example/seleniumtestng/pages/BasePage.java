@@ -1,6 +1,7 @@
 package com.example.seleniumtestng.pages;
 
 import com.example.seleniumtestng.config.ConfigReader;
+import java.text.Normalizer;
 import java.time.Duration;
 import java.util.List;
 import org.openqa.selenium.By;
@@ -76,6 +77,85 @@ public abstract class BasePage {
         element.click();
         element.sendKeys(Keys.chord(Keys.CONTROL, "a"), Keys.DELETE);
         element.sendKeys(value, Keys.ENTER);
+    }
+
+    protected WebElement visibleWithin(By locator, long timeoutMillis) {
+        try {
+            return shortWait(timeoutMillis).until(driver -> {
+                for (WebElement element : driver.findElements(locator)) {
+                    if (displayed(element)) {
+                        return element;
+                    }
+                }
+                return null;
+            });
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    protected WebElement enabledWithin(By locator, long timeoutMillis) {
+        try {
+            return shortWait(timeoutMillis).until(driver -> {
+                for (WebElement element : driver.findElements(locator)) {
+                    if (displayed(element) && element.isEnabled()) {
+                        return element;
+                    }
+                }
+                return null;
+            });
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    protected boolean isVisibleWithin(By locator, long timeoutMillis) {
+        return visibleWithin(locator, timeoutMillis) != null;
+    }
+
+    protected String xpathText(String value) {
+        if (value == null) {
+            return "''";
+        }
+        if (!value.contains("'")) {
+            return "'" + value + "'";
+        }
+        if (!value.contains("\"")) {
+            return "\"" + value + "\"";
+        }
+        StringBuilder builder = new StringBuilder("concat(");
+        for (int index = 0; index < value.length(); index++) {
+            if (index > 0) {
+                builder.append(",");
+            }
+            char character = value.charAt(index);
+            if (character == '\'') {
+                builder.append("\"'\"");
+            } else {
+                builder.append("'").append(character).append("'");
+            }
+        }
+        return builder.append(")").toString();
+    }
+
+    protected String normalizeForMatch(String value) {
+        if (value == null) {
+            return "";
+        }
+        return Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .replace('đ', 'd')
+                .replace('Đ', 'D')
+                .toLowerCase()
+                .trim();
+    }
+
+    protected boolean displayed(WebElement element) {
+        try {
+            return element.isDisplayed();
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     protected WebDriverWait shortWait(long millis) {
