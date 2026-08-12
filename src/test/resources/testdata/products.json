@@ -1,13 +1,17 @@
 {
-  "inboundProducts": [
-    { "sku": "SKU - 1782985586179", "quantity": 1 },
-    { "sku": "SKU - 1782985585628", "quantity": 1 },
-    { "sku": "SKU - 1782985585053", "quantity": 1 }
+  "inboundPackages": [
+    {
+      "products": [{ "sku": "YSL_MS", "quantity": 2000 }]
+    }
   ],
   "orderProducts": [
     {
-      "sku": "SKU-101615",
-      "quantity": 1
+      "sku": "MHMSI",
+      "quantity": 4
+    },
+    {
+      "sku": "MHASUS",
+      "quantity": 4
     }
   ]
 }

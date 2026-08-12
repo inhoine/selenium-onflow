@@ -1,5 +1,6 @@
 package com.example.seleniumtestng.utils;
 
+import com.example.seleniumtestng.models.InboundPackageData;
 import com.example.seleniumtestng.models.InboundProductData;
 import com.example.seleniumtestng.models.OrderProductData;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -7,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -29,6 +31,29 @@ public final class TestDataReader {
             throw new IllegalStateException("Inbound product test data must not be empty");
         }
         validateInboundProducts(products);
+        return List.copyOf(products);
+    }
+
+    public static List<InboundPackageData> inboundPackages() {
+        JsonNode packagesSection = PRODUCT_DATA.path("inboundPackages");
+        if (!packagesSection.isMissingNode() && packagesSection.isArray() && !packagesSection.isEmpty()) {
+            List<InboundPackageData> packages = MAPPER.convertValue(
+                    packagesSection,
+                    new TypeReference<List<InboundPackageData>>() {
+                    });
+            validateInboundPackages(packages);
+            return List.copyOf(packages);
+        }
+        return List.of(new InboundPackageData(inboundProducts()));
+    }
+
+    public static List<InboundProductData> flattenInboundProducts(List<InboundPackageData> packages) {
+        List<InboundProductData> products = new ArrayList<>();
+        for (InboundPackageData inboundPackage : packages) {
+            if (inboundPackage != null && inboundPackage.getProducts() != null) {
+                products.addAll(inboundPackage.getProducts());
+            }
+        }
         return List.copyOf(products);
     }
 
@@ -69,6 +94,38 @@ public final class TestDataReader {
                 throw new IllegalStateException("Inbound product is null at index " + index);
             }
             validateProduct(product.getSku(), product.getQuantity(), "Inbound", index, uniqueSkus);
+        }
+    }
+
+    private static void validateInboundPackages(List<InboundPackageData> packages) {
+        if (packages == null || packages.isEmpty()) {
+            throw new IllegalStateException("Inbound package test data must not be empty");
+        }
+        for (int packageIndex = 0; packageIndex < packages.size(); packageIndex++) {
+            InboundPackageData inboundPackage = packages.get(packageIndex);
+            if (inboundPackage == null) {
+                throw new IllegalStateException("Inbound package is null at index " + packageIndex);
+            }
+            List<InboundProductData> products = inboundPackage.getProducts();
+            if (products == null || products.isEmpty()) {
+                throw new IllegalStateException("Inbound package products must not be empty at index " + packageIndex);
+            }
+            Set<String> uniqueSkus = new HashSet<>();
+            for (int productIndex = 0; productIndex < products.size(); productIndex++) {
+                InboundProductData product = products.get(productIndex);
+                if (product == null) {
+                    throw new IllegalStateException("Inbound package product is null at package "
+                            + packageIndex
+                            + ", product "
+                            + productIndex);
+                }
+                validateProduct(
+                        product.getSku(),
+                        product.getQuantity(),
+                        "Inbound package " + packageIndex,
+                        productIndex,
+                        uniqueSkus);
+            }
         }
     }
 

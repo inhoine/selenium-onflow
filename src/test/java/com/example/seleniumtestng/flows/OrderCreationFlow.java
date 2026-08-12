@@ -19,7 +19,7 @@ public class OrderCreationFlow {
     }
 
     public List<CreatedOrder> createB2cOrders(int orderCount, List<OrderProductData> products) {
-        driver.get(url("OMS", "/login"));
+        driver.get(url("OMS", "/auth/login"));
         AuthHelper.loginOms(driver);
         new WebDriverWait(driver, ConfigReader.timeout()).until(ExpectedConditions.urlContains("/dashboard"));
 
@@ -40,6 +40,7 @@ public class OrderCreationFlow {
         driver.get(url("WMS", "/pickup-order"));
 
         CreatePickupOrderPage pickupOrderPage = new CreatePickupOrderPage(driver);
+        pickupOrderPage.selectBtnPickUp();
         pickupOrderPage.configureRequiredSetup(
                 ConfigReader.required("CREATE_ORDER_PICKUP_TYPE"),
                 ConfigReader.get("CREATE_ORDER_PICKUP_STRATEGY"),
@@ -53,12 +54,13 @@ public class OrderCreationFlow {
     }
 
     private CreatedOrder createB2cOrder(int orderIndex, List<OrderProductData> products) {
-        driver.get(url("OMS", "/orders-b2c?"));
+        driver.get(url("OMS", "/outbound/orders/b2c?"));
         CreateOrderOmsPage createOrder = new CreateOrderOmsPage(driver);
         createOrder.accessCreateOrder();
         createOrder.selectCustomerOms(ConfigReader.required("CREATE_ORDER_CUSTOMER"));
         createOrder.selectSaleStore(ConfigReader.required("CREATE_ORDER_SALES_CHANNEL"));
         createOrder.selectChoosePickup(ConfigReader.required("CREATE_ORDER_PICKUP_CODE"));
+        createOrder.continueToProductStep();
         addOrderProducts(createOrder, products);
         String orderNumber = createOrder.inputOrderNumber(orderIndex);
         createOrder.confirmCreateOrder();

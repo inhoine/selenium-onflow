@@ -11,7 +11,9 @@ import org.openqa.selenium.WebElement;
 import org.openqa.selenium.interactions.Actions;
 
 public class CreatePickupOrderPage extends BasePage {
+    private final By btnCreatePickup = By.xpath(("//button[normalize-space()='Tạo bảng kê' or normalize-space()='Tao bang ke']"));
     private final By pickUpTypeField = By.xpath("//*[normalize-space()='Chọn loại bảng kê' or normalize-space()='Chon loai bang ke']/ancestor::div[contains(@class,'-control')][1]");
+    private final By pickUpTypeInput = By.xpath("//*[normalize-space()='Chọn loại bảng kê' or normalize-space()='Chon loai bang ke']/following::input[1]");
     private final By pickUpStrategyField = By.xpath("//*[normalize-space()='Chọn loại chiến lược' or normalize-space()='Chon loai chien luoc']/ancestor::div[contains(@class,'-control')][1]");
     private final By orderSizeField = By.xpath("//*[normalize-space()='Chọn kích thước đơn hàng' or normalize-space()='Chon kich thuoc don hang']/ancestor::div[contains(@class,'-control')][1]");
     private final By chooseCustomerField = By.xpath("//div[contains(.,'Chọn khách hàng') or contains(.,'Chon khach hang')]/ancestor::div[contains(@class,'-control')]");
@@ -27,7 +29,7 @@ public class CreatePickupOrderPage extends BasePage {
     private final By orderListTextarea = By.xpath("//textarea[contains(@placeholder,'Nhập danh sách mã đơn hàng') or contains(@placeholder,'Nhap danh sach ma don hang')]");
     private final By orderListConfirmBtn = By.xpath("//*[normalize-space()='Nhập danh sách đơn hàng' or normalize-space()='Nhap danh sach don hang']/following::button[normalize-space()='Xác nhận' or normalize-space()='Xac nhan'][1]");
     private final By confirmAddOrderBtn = By.xpath("//button[normalize-space()='Xác nhận' or normalize-space()='Xac nhan']");
-    private final By createPickUpBtn = By.xpath("//button[normalize-space()='Tạo bảng kê' or normalize-space()='Tao bang ke']");
+    private final By createPickUpBtn = By.xpath("//button[@class='pickup-create-form__submit btn btn-success']");
     private final By notificationSuccess = By.xpath("//div[contains(@class,'Toastify__toast-body')]//div[normalize-space()='Tạo bảng kê thành công !' or contains(.,'Tạo bảng kê thành công') or contains(.,'Tao bang ke thanh cong')]");
 
     public CreatePickupOrderPage(WebDriver driver) {
@@ -43,8 +45,18 @@ public class CreatePickupOrderPage extends BasePage {
         selectPickUpStrategy(requireValue(pickupStrategy, "CREATE_ORDER_PICKUP_STRATEGY", pickupType));
     }
 
+    public void selectBtnPickUp(){
+        WebElement createButton = clickable(btnCreatePickup);
+        jsClick(createButton);
+    }
     public void selectPickUpType(String typeName) {
-        selectDropdownOption(pickUpTypeField, typeName);
+        // selectDropdownOption(pickUpTypeField, typeName);
+        click(pickUpTypeField);
+        WebElement input = visible(pickUpTypeInput);
+        input.clear();
+        input.sendKeys(typeName);
+        visible(optionContains(typeName));
+        input.sendKeys(Keys.ENTER);
     }
 
     public void selectPickUpStrategy(String strategyName) {
@@ -71,13 +83,13 @@ public class CreatePickupOrderPage extends BasePage {
     }
 
     public void addOrdersCustomize(List<String> trackingNumbers) {
-        jsClick(clickable(customizeBtn));
+        // jsClick(clickable(customizeBtn));
         selectOrderListConditionIfNeeded();
         jsClick(clickable(inputOrderListBtn));
         visible(orderListModalTitle);
         typeOrderListTextarea(commaSeparated(trackingNumbers));
         clickOrderListConfirm();
-        jsClick(clickable(customizeModalConfirmBtn));
+        // jsClick(clickable(customizeModalConfirmBtn));
         WebElement createButton = clickable(createPickUpBtn);
         jsClick(createButton);
     }

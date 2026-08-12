@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
 import org.openqa.selenium.By;
 import org.openqa.selenium.ElementClickInterceptedException;
 import org.openqa.selenium.Keys;
+import org.openqa.selenium.StaleElementReferenceException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 
@@ -25,15 +26,26 @@ public class PickAndPackOrderPage extends BasePage {
 
     private final By scanPackingTrolleyField = By.xpath("//input[@placeholder='Quét mã XE/ bảng kê cần đóng gói']");
     private final By receivePackingTrolleyBtn = By.xpath("//button[normalize-space()='Nhận bảng kê' or normalize-space()='Nhan bang ke']");
-    private final By scanPickUpField = By.xpath("//input[@placeholder='Quét mã Xe/ Bảng kê/ Rổ']");
-    private final By scanSkuField = By.xpath("//input[contains(@placeholder,'Sản phẩm') or contains(@placeholder,'San pham')]");
+    private final By scanPickUpField = By.xpath("//input[contains(@placeholder,'Xe')"
+            + " or contains(@placeholder,'Bảng kê')"
+            + " or contains(@placeholder,'bảng kê')"
+            + " or contains(@placeholder,'Bang ke')"
+            + " or contains(@placeholder,'bang ke')"
+            + " or contains(@placeholder,'Rổ')"
+            + " or contains(@placeholder,'Ro')]");
+    private final By scanSkuField = By.xpath("//input[contains(@placeholder,'Sản phẩm')"
+            + " or contains(@placeholder,'sản phẩm')"
+            + " or contains(@placeholder,'San pham')"
+            + " or contains(@placeholder,'san pham')]");
     private final By packagingMaterialsField = By.xpath("//input[@placeholder='Quét hoặc nhập mã vật liệu đóng gói']");
     private final By fallbackPackagingMaterial = By.xpath("//*[contains(normalize-space(.),'Băng keo') or contains(normalize-space(.),'Bang keo')]");
     private final By productRows = By.xpath("//tr[.//div[contains(@id,'barcode_')]]");
-    private final By currentTrackingCode = By.xpath("//h6[contains(.,'Bạn đang đóng gói cho đơn hàng')]//span[contains(@class,'fw-medium')]");
+    private final By currentTrackingCode = By.xpath("//*[contains(normalize-space(.),'Bạn đang đóng gói cho đơn hàng')"
+            + " or contains(normalize-space(.),'Ban dang dong goi cho don hang')]");
     private final By packingDetailToggle = By.xpath("//*[normalize-space()='(Chi tiết)' or normalize-space()='(Chi tiet)']");
     private final By visibleModal = By.cssSelector(".modal.show");
     private final By visibleModalCloseButton = By.xpath("//*[contains(@class,'modal') and contains(@class,'show')]//button[contains(@class,'btn-close') or @aria-label='Close' or normalize-space()='×' or normalize-space()='Đóng' or normalize-space()='Dong']");
+    private final By confirmScanPickupButton = By.xpath("//button[normalize-space()='Xác nhận' or normalize-space()='Xac nhan']");
 
     public PickAndPackOrderPage(WebDriver driver) {
         super(driver);
@@ -71,24 +83,22 @@ public class PickAndPackOrderPage extends BasePage {
     }
 
     public void scanTablePacking(String tableCode) {
-        driver.get(ConfigReader.required("WMS_BASE_URL") + "/packing");
+        scanTablePacking(tableCode, "/packing");
+    }
+
+    public void scanTablePackingB2b(String tableCode) {
+        scanTablePacking(tableCode, "/packing-b2b");
+    }
+
+    private void scanTablePacking(String tableCode, String packingPath) {
+        driver.get(ConfigReader.required("WMS_BASE_URL") + packingPath);
         new ScanTable(driver).scanIfPresent(tableCode);
-        visible(scanPickUpField);
+        waitForScanPickupInput();
     }
 
     public void scanPickUpOrder(String pickupId) {
         closeBlockingModalIfPresent();
-        WebElement input = wait.until(driver -> {
-            for (WebElement element : all(scanPickUpField)) {
-                try {
-                    if (element.isDisplayed() && element.isEnabled()) {
-                        return element;
-                    }
-                } catch (RuntimeException ignored) {
-                }
-            }
-            return null;
-        });
+        WebElement input = waitForScanPickupInput();
         try {
             clearAndEnter(input, pickupId);
         } catch (ElementClickInterceptedException error) {
@@ -96,6 +106,7 @@ public class PickAndPackOrderPage extends BasePage {
             setInputValue(input, pickupId);
             input.sendKeys(Keys.ENTER);
         }
+        clickConfirmScanPickupButtonIfPresent();
         waitForBasketScanToOpenPackingContext(pickupId);
         System.out.println("Scanned pickup/basket code: " + pickupId);
     }
@@ -322,6 +333,7 @@ public class PickAndPackOrderPage extends BasePage {
             scanOrClickPackagingMaterial(CUSTOMER_PACKING_MATERIAL_FALLBACK_CODE);
             sleep(MATERIAL_DELAY_MS);
         }
+        confirmAttachedDocumentsPrintedIfPresent();
     }
 
     private void scanOrClickPackagingMaterial(String materialCode) {
@@ -384,6 +396,67 @@ public class PickAndPackOrderPage extends BasePage {
         }
     }
 
+    private void confirmAttachedDocumentsPrintedIfPresent() {
+        WebElement confirmButton = findAttachedDocumentsPrintedConfirmButton(3000);
+        if (confirmButton == null) {
+            return;
+        }
+
+        jsClick(confirmButton);
+        System.out.println("Confirmed all attached documents were printed");
+        try {
+            shortWait(5000).until(driver -> !isAttachedDocumentsModalVisibleNow() ? true : null);
+        } catch (RuntimeException ignored) {
+            System.out.println("Attached documents modal is still visible after confirming printed documents");
+        }
+    }
+
+    private WebElement findAttachedDocumentsPrintedConfirmButton(long timeoutMillis) {
+        try {
+            return shortWait(timeoutMillis).until(driver -> findAttachedDocumentsPrintedConfirmButtonNow());
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private WebElement findAttachedDocumentsPrintedConfirmButtonNow() {
+        for (WebElement modal : driver.findElements(visibleModal)) {
+            try {
+                if (!modal.isDisplayed() || !isAttachedDocumentsModal(modal)) {
+                    continue;
+                }
+                for (WebElement button : modal.findElements(By.cssSelector("button"))) {
+                    if (!button.isDisplayed() || !button.isEnabled()) {
+                        continue;
+                    }
+                    if (normalizeScanText(button.getText()).contains("xac nhan da in het")) {
+                        return button;
+                    }
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+        return null;
+    }
+
+    private boolean isAttachedDocumentsModalVisibleNow() {
+        for (WebElement modal : driver.findElements(visibleModal)) {
+            try {
+                if (modal.isDisplayed() && isAttachedDocumentsModal(modal)) {
+                    return true;
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+        return false;
+    }
+
+    private boolean isAttachedDocumentsModal(WebElement modal) {
+        String text = normalizeScanText(modal.getText());
+        return text.contains("danh sach tai lieu dinh kem")
+                || text.contains("vui long in tat ca cac tai lieu dinh kem");
+    }
+
     private String normalizedToastText(String text) {
         if (text == null) {
             return "";
@@ -424,20 +497,85 @@ public class PickAndPackOrderPage extends BasePage {
             System.out.println("Packing context was not ready after scanning " + pickupId + "; retry scan once");
         }
 
-        WebElement input = findVisibleEnabled(scanPickUpField, 2000);
+        WebElement input = findScanPickupInput(2000);
         if (input == null) {
             throw new IllegalStateException("Packing context did not open after scanning " + pickupId
                     + ", and pickup scan input is not available. Screen=" + summarizeScreenText());
         }
         setInputValue(input, pickupId);
         input.sendKeys(Keys.ENTER);
+        clickConfirmScanPickupButtonIfPresent();
         try {
             shortWait(5000).until(driver -> isPackingContextOpenNow() ? true : null);
         } catch (RuntimeException error) {
-            throw new IllegalStateException("Packing context did not open after retrying pickup/basket scan "
-                    + pickupId
-                    + ". Screen=" + summarizeScreenText(), error);
+            WebElement confirmButton = findVisibleEnabled(confirmScanPickupButton, 1000);
+            if (confirmButton == null) {
+                throw new IllegalStateException("Packing context did not open after retrying pickup/basket scan "
+                        + pickupId
+                        + ". Screen=" + summarizeScreenText(), error);
+            }
+            jsClick(confirmButton);
+            try {
+                shortWait(5000).until(driver -> isPackingContextOpenNow() ? true : null);
+            } catch (RuntimeException retryError) {
+                throw new IllegalStateException("Packing context did not open after confirming pickup/basket scan "
+                        + pickupId
+                        + ". Screen=" + summarizeScreenText(), retryError);
+            }
         }
+    }
+
+    private WebElement waitForScanPickupInput() {
+        return wait.until(driver -> findScanPickupInputNow());
+    }
+
+    private WebElement findScanPickupInput(long timeoutMillis) {
+        try {
+            return shortWait(timeoutMillis).until(driver -> findScanPickupInputNow());
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    private WebElement findScanPickupInputNow() {
+        WebElement matchedInput = findVisibleEnabledNow(scanPickUpField);
+        if (matchedInput != null) {
+            return matchedInput;
+        }
+
+        for (WebElement input : driver.findElements(By.cssSelector("input"))) {
+            try {
+                if (!input.isDisplayed() || !input.isEnabled()) {
+                    continue;
+                }
+                String placeholder = normalizeScanText(input.getAttribute("placeholder"));
+                if (placeholder.contains("bang ke") || placeholder.contains("xe") || placeholder.contains("ro")) {
+                    return input;
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+        return null;
+    }
+
+    private void clickConfirmScanPickupButtonIfPresent() {
+        WebElement confirmButton = findVisibleEnabled(confirmScanPickupButton, 500);
+        if (confirmButton != null) {
+            jsClick(confirmButton);
+        }
+    }
+
+    private String normalizeScanText(String text) {
+        if (text == null) {
+            return "";
+        }
+        return Normalizer.normalize(text, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .replace('đ', 'd')
+                .replace('Đ', 'D')
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     private boolean isPackingContextOpenNow() {
@@ -550,10 +688,7 @@ public class PickAndPackOrderPage extends BasePage {
             return;
         }
 
-        WebElement closeButton = findVisible(visibleModalCloseButton, 1000);
-        if (closeButton != null) {
-            jsClick(closeButton);
-        } else {
+        if (!clickVisibleModalCloseButton()) {
             driver.findElement(By.tagName("body")).sendKeys(Keys.ESCAPE);
         }
 
@@ -569,6 +704,24 @@ public class PickAndPackOrderPage extends BasePage {
         } catch (RuntimeException ignored) {
             System.out.println("Modal still visible after close attempt; continue with input wait");
         }
+    }
+
+    private boolean clickVisibleModalCloseButton() {
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            WebElement closeButton = findVisible(visibleModalCloseButton, 1000);
+            if (closeButton == null) {
+                return false;
+            }
+            try {
+                jsClick(closeButton);
+                return true;
+            } catch (StaleElementReferenceException ignored) {
+                if (findVisible(visibleModal, 200) == null) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private WebElement findVisibleEnabled(By locator, long timeoutMillis) {
@@ -609,7 +762,11 @@ public class PickAndPackOrderPage extends BasePage {
                 for (WebElement element : driver.findElements(currentTrackingCode)) {
                     try {
                         if (element.isDisplayed() && !element.getText().trim().isBlank()) {
-                            return element.getText().trim();
+                            String text = element.getText().trim();
+                            String trackingCode = extractCurrentTrackingCode(text);
+                            if (trackingCode != null) {
+                                return trackingCode;
+                            }
                         }
                     } catch (RuntimeException ignored) {
                     }
@@ -619,6 +776,14 @@ public class PickAndPackOrderPage extends BasePage {
         } catch (RuntimeException ignored) {
             return null;
         }
+    }
+
+    private String extractCurrentTrackingCode(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        Matcher matcher = Pattern.compile("(?i)(?:đơn hàng|don hang)\\s+([A-Z0-9][A-Z0-9-]+)").matcher(text);
+        return matcher.find() ? matcher.group(1) : null;
     }
 
     private String summarizeScreenText() {

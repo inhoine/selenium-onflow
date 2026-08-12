@@ -34,6 +34,7 @@ public class PickPackTest extends BaseTest {
         PickAndPackOrderPage pickAndPackOrderPage = new PickAndPackOrderPage(driver);
         PickupDetail pickupDetail = wmsApiClient.getPickupDetailInfo(pickupId, token);
         int basketCount = basketCountFor(pickupDetail);
+        boolean b2bPacking = isB2bPickup(pickupDetail);
         System.out.println("Pickup detail: code=" + pickupDetail.pickupCode()
                 + ", internalId=" + pickupDetail.pickupId()
                 + ", type=" + pickupDetail.pickupType()
@@ -82,16 +83,20 @@ public class PickPackTest extends BaseTest {
             preparePickingIfNeeded(wmsApiClient, pickupId, pickingEquipmentCode, token);
         }
 
+        String packingTableCode = ConfigReader.required("DEFAULT_PACKING_TABLE_CODE");
+        boolean packingTableScanned = false;
         if (basketCount == 0) {
             pickAndPackOrderPage.receivePackingTrolley(pickupId);
             pickAndPackOrderPage.verifyToastMessageIfPresent("Nhận bảng kê thành công", 5000);
+            System.out.println("Packing page: " + (b2bPacking ? "/packing-b2b" : "/packing"));
+            scanPackingTable(pickAndPackOrderPage, packingTableCode, b2bPacking);
+            packingTableScanned = true;
         } else {
             System.out.println("Skip receive packing trolley for basket pickup type: " + pickupDetail.pickupType());
         }
 
         List<PackingOrder> packingOrders = wmsApiClient.getPickupPackingOrders(pickupId, token);
         Assert.assertFalse(packingOrders.isEmpty(), "No packing orders found for pickup " + pickupId);
-        String packingTableCode = ConfigReader.required("DEFAULT_PACKING_TABLE_CODE");
         int processedOrderCount;
         if (isMsoPickup(pickupDetail)) {
             List<PickOrderBasket> pickOrderBaskets = wmsApiClient.getPickOrderBaskets(pickupId, token);
@@ -109,11 +114,15 @@ public class PickPackTest extends BaseTest {
                     readyBaskets,
                     packingOrders,
                     packingMaterialCode,
-                    packingTableCode);
+                    packingTableCode,
+                    b2bPacking);
             Assert.assertEquals(processedOrderCount, readyBaskets.size(),
                     "MSO packing should process one order per basket with status_id=502/503");
         } else {
-            pickAndPackOrderPage.scanTablePacking(packingTableCode);
+            if (!packingTableScanned) {
+                System.out.println("Packing page: " + (b2bPacking ? "/packing-b2b" : "/packing"));
+                scanPackingTable(pickAndPackOrderPage, packingTableCode, b2bPacking);
+            }
             String packingScanCode = basketCount > 0 ? basketCodes.get(0) : pickupId;
             pickAndPackOrderPage.scanPickUpOrder(packingScanCode);
             processedOrderCount = pickAndPackOrderPage.packBySystemSuggestion(packingOrders, packingMaterialCode);
@@ -126,13 +135,14 @@ public class PickPackTest extends BaseTest {
             List<PickOrderBasket> baskets,
             List<PackingOrder> packingOrders,
             String packingMaterialCode,
-            String packingTableCode) {
+            String packingTableCode,
+            boolean b2bPacking) {
         int processedOrderCount = 0;
         for (PickOrderBasket basket : baskets) {
             Assert.assertNotNull(basket.trackingCode(),
                     "MSO basket has no mapped tracking/order code: " + basket.code());
             PackingOrder packingOrder = packingOrderByTrackingCode(packingOrders, basket.trackingCode());
-            pickAndPackOrderPage.scanTablePacking(packingTableCode);
+            scanPackingTable(pickAndPackOrderPage, packingTableCode, b2bPacking);
             pickAndPackOrderPage.scanPickUpOrder(basket.code());
             String processedTrackingCode = pickAndPackOrderPage.packOneOrderBySystemSuggestion(
                     packingOrder,
@@ -143,6 +153,17 @@ public class PickPackTest extends BaseTest {
             processedOrderCount++;
         }
         return processedOrderCount;
+    }
+
+    private void scanPackingTable(
+            PickAndPackOrderPage pickAndPackOrderPage,
+            String packingTableCode,
+            boolean b2bPacking) {
+        if (b2bPacking) {
+            pickAndPackOrderPage.scanTablePackingB2b(packingTableCode);
+            return;
+        }
+        pickAndPackOrderPage.scanTablePacking(packingTableCode);
     }
 
     private List<PickOrderBasket> readyPackingBaskets(List<PickOrderBasket> baskets, List<String> expectedBasketCodes) {
@@ -247,6 +268,11 @@ public class PickPackTest extends BaseTest {
     private boolean isMsoPickup(PickupDetail pickupDetail) {
         String pickupType = pickupDetail.pickupType() == null ? "" : pickupDetail.pickupType().trim().toLowerCase();
         return pickupType.contains("mso");
+    }
+
+    private boolean isB2bPickup(PickupDetail pickupDetail) {
+        String pickupType = pickupDetail.pickupType() == null ? "" : pickupDetail.pickupType().trim().toLowerCase();
+        return pickupType.contains("b2b");
     }
 
     private String trolleyEquipmentGroup() {

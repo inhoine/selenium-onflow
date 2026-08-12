@@ -23,7 +23,7 @@ public class EquipmentPage extends BasePage {
     }
 
     public String addEquipment(String equipmentGroupName, String equipmentTypeName, String equipmentSizeName) {
-        String equipmentCode = "THIET-BI-" + (System.currentTimeMillis() % 100000);
+        String equipmentCode = "THIET-BI-" + (System.currentTimeMillis() % 1000);
         click(addEquipmentBtn);
         type(equipmentCodeField, equipmentCode);
         click(equipmentGroupDropdown);

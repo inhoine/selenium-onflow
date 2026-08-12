@@ -82,7 +82,7 @@ public class PackingCampaignPage extends BasePage {
     }
 
     private void scanTableIfPresent(String tableCode) {
-        WebElement tableInput = findInputByPlaceholder(3000, "ma ban", "ban");
+        WebElement tableInput = findInputByPlaceholder(3000, "ma tram", "tram");
         if (tableInput == null) {
             System.out.println("Packing campaign table scan is not required or table is already selected");
             return;
@@ -96,7 +96,7 @@ public class PackingCampaignPage extends BasePage {
                 if (campaignInput != null && !isTableInput(campaignInput)) {
                     return true;
                 }
-                WebElement currentTableInput = findInputByPlaceholderNow("ma ban", "ban");
+                WebElement currentTableInput = findInputByPlaceholderNow("ma tram", "tram");
                 return currentTableInput == null ? true : null;
             });
         } catch (RuntimeException ignored) {

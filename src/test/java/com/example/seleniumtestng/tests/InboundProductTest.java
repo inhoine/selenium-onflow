@@ -5,6 +5,7 @@ import com.example.seleniumtestng.clients.WmsApiClient;
 import com.example.seleniumtestng.config.ConfigReader;
 import com.example.seleniumtestng.flows.AuthHelper;
 import com.example.seleniumtestng.flows.InboundCreationFlow;
+import com.example.seleniumtestng.models.InboundPackageData;
 import com.example.seleniumtestng.models.InboundProductData;
 import com.example.seleniumtestng.models.POSku;
 import com.example.seleniumtestng.pages.InboundProductWmsPage;
@@ -24,11 +25,14 @@ public class InboundProductTest extends BaseTest {
     @Test
     public void createAndInspectInboundProduct() {
         boolean createNewInbound = ConfigReader.getBoolean("INBOUND_CREATE_NEW", true);
+        List<InboundPackageData> inboundPackages = createNewInbound
+                ? TestDataReader.inboundPackages()
+                : Collections.emptyList();
         List<InboundProductData> inboundProducts = createNewInbound
-                ? TestDataReader.inboundProducts()
+                ? TestDataReader.flattenInboundProducts(inboundPackages)
                 : Collections.emptyList();
         String inboundCode = createNewInbound
-                ? new InboundCreationFlow(driver).createApprovedInbound(inboundProducts)
+                ? new InboundCreationFlow(driver).createApprovedInboundPackages(inboundPackages)
                 : ConfigReader.required("INBOUND_PO_CODE");
 
         driver.get(url("WMS", "/login"));
@@ -78,6 +82,7 @@ public class InboundProductTest extends BaseTest {
                                 inboundWms,
                                 boxCode,
                                 boxProductMetadata,
+                                inboundPackages,
                                 inboundProducts);
                     } catch (RuntimeException e) {
                         if (refreshedForBox) {
@@ -192,12 +197,16 @@ public class InboundProductTest extends BaseTest {
             InboundProductWmsPage inboundWms,
             String boxCode,
             Map<String, POSku> productMetadata,
+            List<InboundPackageData> inboundPackages,
             List<InboundProductData> inboundProducts) {
         inboundWms.scanBoxIfNeeded(boxCode);
         List<ScannedInboundProduct> visibleProducts = inboundWms.scannedProductsIfPresent(boxCode);
         if (Boolean.parseBoolean(ConfigReader.getOrDefault("INBOUND_ASSERT_TESTDATA", "false"))) {
             assertScannedProductsReadable(visibleProducts, boxCode);
-            assertInboundProductsVisible(inboundProducts, visibleProducts, boxCode);
+            assertInboundProductsVisible(
+                    expectedProductsForBox(inboundPackages, boxCode, inboundProducts),
+                    visibleProducts,
+                    boxCode);
         }
 
         ScannedInboundProduct scannedProduct = inboundWms.openFirstInspectableProduct(boxCode);
@@ -241,6 +250,32 @@ public class InboundProductTest extends BaseTest {
                     actual.quantityTotalInbound(),
                     expected.getQuantity(),
                     "Unexpected inbound quantity for SKU " + expected.getSku() + " after scanning box " + boxCode);
+        }
+    }
+
+    private List<InboundProductData> expectedProductsForBox(
+            List<InboundPackageData> inboundPackages,
+            String boxCode,
+            List<InboundProductData> fallbackProducts) {
+        int packageIndex = packageIndexFromBoxCode(boxCode);
+        if (packageIndex >= 0 && packageIndex < inboundPackages.size()) {
+            return inboundPackages.get(packageIndex).getProducts();
+        }
+        return fallbackProducts;
+    }
+
+    private int packageIndexFromBoxCode(String boxCode) {
+        if (boxCode == null) {
+            return -1;
+        }
+        String digits = boxCode.replaceAll("\\D+", "");
+        if (digits.isBlank()) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(digits) - 1;
+        } catch (NumberFormatException e) {
+            return -1;
         }
     }
 

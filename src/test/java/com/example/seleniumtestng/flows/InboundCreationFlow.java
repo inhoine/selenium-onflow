@@ -1,6 +1,7 @@
 package com.example.seleniumtestng.flows;
 
 import com.example.seleniumtestng.config.ConfigReader;
+import com.example.seleniumtestng.models.InboundPackageData;
 import com.example.seleniumtestng.models.InboundProductData;
 import com.example.seleniumtestng.pages.CreateInboundProductPage;
 import java.util.List;
@@ -16,22 +17,23 @@ public class InboundCreationFlow {
     }
 
     public String createApprovedInbound(List<InboundProductData> products) {
-        driver.get(url("OMS", "/login"));
+        return createApprovedInboundPackages(List.of(new InboundPackageData(products)));
+    }
+
+    public String createApprovedInboundPackages(List<InboundPackageData> packages) {
+        driver.get(url("OMS", "/auth/login"));
         AuthHelper.loginOms(driver);
         new WebDriverWait(driver, ConfigReader.timeout()).until(ExpectedConditions.urlContains("/dashboard"));
 
-        driver.get(url("OMS", "/list-shipment-inbound?"));
+        driver.get(url("OMS", "/inbound/shipments?"));
         CreateInboundProductPage createInbound = new CreateInboundProductPage(driver);
         createInbound.openCreateInboundForm();
         createInbound.selectWarehouse(ConfigReader.required("INBOUND_WAREHOUSE_CODE"));
         createInbound.selectSupplier(ConfigReader.required("INBOUND_SUPPLIER"));
         createInbound.inputReference();
-        addInboundProducts(createInbound, products);
-        createInbound.confirmItems();
-        createInbound.inputProductDimensions(
-                ConfigReader.requiredInt("INBOUND_LENGTH"),
-                ConfigReader.requiredInt("INBOUND_WIDTH"),
-                ConfigReader.requiredInt("INBOUND_HEIGHT"));
+        createInbound.continueIfPresent();
+        addInboundPackages(createInbound, packages);
+        createInbound.continueIfPresent();
         createInbound.confirmCreateInbound();
 
         String inboundCode = createInbound.getInboundCode();
@@ -41,8 +43,23 @@ public class InboundCreationFlow {
         return inboundCode;
     }
 
+    private void addInboundPackages(CreateInboundProductPage createInbound, List<InboundPackageData> packages) {
+        for (int packageIndex = 0; packageIndex < packages.size(); packageIndex++) {
+            if (packageIndex > 0) {
+                createInbound.addPackageRow();
+            }
+            createInbound.clickAddProductForPackage(packageIndex);
+            addInboundProducts(createInbound, packages.get(packageIndex).getProducts());
+            createInbound.confirmItems();
+            createInbound.inputPackageDimensions(
+                    packageIndex,
+                    ConfigReader.requiredInt("INBOUND_LENGTH"),
+                    ConfigReader.requiredInt("INBOUND_WIDTH"),
+                    ConfigReader.requiredInt("INBOUND_HEIGHT"));
+        }
+    }
+
     private void addInboundProducts(CreateInboundProductPage createInbound, List<InboundProductData> products) {
-        createInbound.clickAddProduct();
         for (int index = 0; index < products.size(); index++) {
             if (index > 0) {
                 createInbound.addNewProductRow();
