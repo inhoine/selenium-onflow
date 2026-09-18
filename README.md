@@ -22,7 +22,7 @@ Automation project for OMS/WMS flows using Java, Selenium WebDriver, Maven, and 
 
 ## Requirements
 
-- Java 11+
+- Java 25+
 - Maven
 - Google Chrome
 
