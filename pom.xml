@@ -14,7 +14,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <selenium.version>4.33.0</selenium.version>
         <testng.version>7.11.0</testng.version>
-        <jackson.version>2.18.2</jackson.version>
+        <jackson.version>2.18.9</jackson.version>
     </properties>
 
     <dependencies>
