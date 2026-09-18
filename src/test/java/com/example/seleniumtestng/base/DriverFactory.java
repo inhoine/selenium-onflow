@@ -1,5 +1,6 @@
 package com.example.seleniumtestng.base;
 
+import com.example.seleniumtestng.config.ConfigReader;
 import java.time.Duration;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.chrome.ChromeDriver;
@@ -25,6 +26,9 @@ public final class DriverFactory {
             default:
                 ChromeOptions options = new ChromeOptions();
                 options.addArguments("--no-first-run", "--no-default-browser-check");
+                if (ConfigReader.getBoolean("HEADLESS", false)) {
+                    options.addArguments("--headless=new", "--disable-gpu", "--window-size=1920,1080");
+                }
                 driver = new ChromeDriver(options);
                 break;
         }

@@ -72,6 +72,12 @@ Run all TestNG tests:
 mvn test
 ```
 
+Run tests without opening Chrome windows:
+
+```bash
+mvn -DHEADLESS=true test
+```
+
 Run the TestNG suite file:
 
 ```bash
