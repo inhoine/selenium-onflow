@@ -18,6 +18,7 @@ public class CreateInboundProductPage extends BasePage {
     private final By warehouseInput = By.xpath("//div[contains(.,'Chọn địa chỉ lấy hàng') or contains(.,'Chon dia chi lay hang')]/following::input[1]");
     private final By supplierField = By.xpath("//div[contains(.,'Chọn nhà cung cấp') or contains(.,'Chon nha cung cap')]/ancestor::div[contains(@class,'-control')]");
     private final By supplierInput = By.xpath("//div[contains(.,'Chọn nhà cung cấp') or contains(.,'Chon nha cung cap')]/following::input[1]");
+    private final By reactSelectControls = By.cssSelector("div[class*='-control']");
     private final By referenceField = By.cssSelector("input[name='shipmentReferenceCode']");
     private final By addProductBtn = By.xpath("//*[normalize-space()='Thêm sản phẩm' or normalize-space()='Them san pham']");
     private final By addNewProductBtn = By.xpath("//button[normalize-space()='Thêm sản phẩm mới' or normalize-space()='Them san pham moi']");
@@ -40,11 +41,11 @@ public class CreateInboundProductPage extends BasePage {
     }
 
     public void selectWarehouse(String keyword) {
-        selectReactOption(warehouseField, warehouseInput, keyword);
+        selectReactOption(warehouseField, warehouseInput, keyword, 0);
     }
 
     public void selectSupplier(String keyword) {
-        selectReactOption(supplierField, supplierInput, keyword);
+        selectReactOption(supplierField, supplierInput, keyword, 1);
     }
 
     public String inputReference() {
@@ -117,12 +118,33 @@ public class CreateInboundProductPage extends BasePage {
     }
 
     public String getInboundCode() {
-        String text = visible(inboundCodeText).getText();
-        Matcher matcher = Pattern.compile("NHIV\\d+").matcher(text);
-        if (!matcher.find()) {
-            throw new IllegalStateException("Inbound code not found in text: " + text);
+        String inboundCode = shortWait(30000).until(driver -> {
+            String fromUrl = firstInboundCode(driver.getCurrentUrl());
+            if (fromUrl != null) {
+                return fromUrl;
+            }
+            for (WebElement element : all(inboundCodeText)) {
+                if (!displayed(element)) {
+                    continue;
+                }
+                String fromLabel = firstInboundCode(element.getText());
+                if (fromLabel != null) {
+                    return fromLabel;
+                }
+            }
+            String fromBody = firstInboundCode(driver.findElement(By.tagName("body")).getText());
+            return fromBody == null ? null : fromBody;
+        });
+        System.out.println("Created inbound PO: " + inboundCode);
+        return inboundCode;
+    }
+
+    private String firstInboundCode(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
         }
-        return matcher.group();
+        Matcher matcher = Pattern.compile("NHIV\\d+").matcher(value);
+        return matcher.find() ? matcher.group() : null;
     }
 
     private void clickCreateInboundDropdown() {
@@ -162,12 +184,36 @@ public class CreateInboundProductPage extends BasePage {
         }
     }
 
-    private void selectReactOption(By field, By inputLocator, String keyword) {
-        click(field);
-        WebElement input = visible(inputLocator);
+    private void selectReactOption(By field, By inputLocator, String keyword, int fallbackControlIndex) {
+        WebElement dropdown = reactSelectControl(field, fallbackControlIndex);
+        try {
+            dropdown.click();
+        } catch (RuntimeException e) {
+            jsClick(dropdown);
+        }
+        WebElement input = inputInside(dropdown, inputLocator);
         input.sendKeys(keyword);
         visible(By.xpath("//*[contains(@class,'-menu')]//*[contains(normalize-space(.)," + xpathText(keyword) + ")]"));
         input.sendKeys(Keys.ENTER);
+    }
+
+    private WebElement reactSelectControl(By preferredLocator, int fallbackControlIndex) {
+        try {
+            return shortWait(3000).until(driver -> {
+                List<WebElement> preferred = visibleElements(preferredLocator);
+                return preferred.isEmpty() ? null : preferred.get(0);
+            });
+        } catch (TimeoutException ignored) {
+            return indexedVisible(reactSelectControls, fallbackControlIndex);
+        }
+    }
+
+    private WebElement inputInside(WebElement dropdown, By fallbackInputLocator) {
+        try {
+            return dropdown.findElement(By.cssSelector("input"));
+        } catch (RuntimeException ignored) {
+            return visible(fallbackInputLocator);
+        }
     }
 
     private WebElement last(By locator) {

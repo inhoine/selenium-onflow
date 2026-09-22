@@ -25,6 +25,10 @@ public class InboundCreationFlow {
         AuthHelper.loginOms(driver);
         new WebDriverWait(driver, ConfigReader.timeout()).until(ExpectedConditions.urlContains("/dashboard"));
 
+        return createApprovedInboundPackagesFromCurrentSession(packages);
+    }
+
+    public String createApprovedInboundPackagesFromCurrentSession(List<InboundPackageData> packages) {
         driver.get(url("OMS", "/inbound/shipments?"));
         CreateInboundProductPage createInbound = new CreateInboundProductPage(driver);
         createInbound.openCreateInboundForm();

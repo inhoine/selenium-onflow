@@ -133,7 +133,7 @@ public class PickAndPackOrderPage extends BasePage {
             String currentTracking = openCurrentOrSuggestedOrder(order.trackingCode());
             if (!visitedTrackingCodes.contains(currentTracking)) {
                 System.out.println("Packing suggested tracking: " + currentTracking);
-                packCurrentSuggestedOrder(materialCode);
+                packCurrentSuggestedOrder(materialCode, order, firstBarcode);
                 visitedTrackingCodes.add(currentTracking);
                 packedOrderCount++;
             } else {
@@ -170,7 +170,7 @@ public class PickAndPackOrderPage extends BasePage {
             }
 
             System.out.println("Packing suggested tracking: " + currentTracking);
-            packCurrentSuggestedOrder(materialCode);
+            packCurrentSuggestedOrder(materialCode, order, firstBarcode);
             visitedTrackingCodes.add(currentTracking);
             return currentTracking;
         }
@@ -199,7 +199,7 @@ public class PickAndPackOrderPage extends BasePage {
         }
 
         System.out.println("Packing mapped basket tracking: " + currentTracking);
-        packCurrentSuggestedOrder(materialCode);
+        packCurrentSuggestedOrder(materialCode, order, firstBarcode);
         return currentTracking;
     }
 
@@ -236,17 +236,25 @@ public class PickAndPackOrderPage extends BasePage {
         return null;
     }
 
-    private void packCurrentSuggestedOrder(String materialCode) {
-        while (true) {
-            if (isPackagingMaterialPromptVisibleNow()) {
-                break;
+    private void packCurrentSuggestedOrder(
+            String materialCode,
+            PackingOrder order,
+            String initiallyScannedBarcode) {
+        boolean initialScanAccounted = false;
+        for (PickupItem item : order.items()) {
+            String barcode = getItemBarcode(item);
+            int quantityToScan = getQuantityNeedScan(item);
+            if (barcode == null || quantityToScan <= 0) {
+                continue;
             }
-            PackingUiItem pending = firstPendingUiItem();
-            if (pending == null) {
-                break;
+            if (!initialScanAccounted && barcode.equals(initiallyScannedBarcode)) {
+                quantityToScan = Math.max(0, quantityToScan - 1);
+                initialScanAccounted = true;
             }
-            if (!scanProductBarcode(pending.barcode())) {
-                break;
+            for (int index = 0; index < quantityToScan; index++) {
+                if (isPackagingMaterialPromptVisibleNow() || !scanProductBarcode(barcode)) {
+                    break;
+                }
             }
             if (isPackagingMaterialPromptVisibleNow()) {
                 break;
@@ -272,7 +280,11 @@ public class PickAndPackOrderPage extends BasePage {
         List<PackingUiItem> items = new ArrayList<>();
         for (WebElement row : rows) {
             String rowText = row.getText();
-            String barcode = row.findElement(By.xpath(".//div[contains(@id,'barcode_')]")).getText().trim();
+            String barcodeText = row.findElement(By.xpath(".//div[contains(@id,'barcode_')]")).getText();
+            String barcode = barcodeText == null ? "" : barcodeText.trim();
+            if (barcode.isBlank()) {
+                continue;
+            }
             Matcher quantityMatcher = QUANTITY_PATTERN.matcher(rowText);
             if (!quantityMatcher.find()) {
                 throw new IllegalStateException("Unable to read packing quantity from row: " + rowText);

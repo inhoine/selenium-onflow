@@ -35,7 +35,14 @@ public class InboundProductWmsPage extends BasePage {
             "//input[@name='quantity_goods_damaged_2' or @name='quantity_damaged_2']");
     private final By damagedType3QtyField = By.xpath(
             "//input[@name='quantity_goods_damaged_3' or @name='quantity_damaged_3']");
-    private final By barcodeField = By.cssSelector("input[name='manufacturer_barcode']");
+    private final By barcodeField = By.xpath("//input[@name='manufacturer_barcode' or contains(translate(@placeholder,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'barcode')]");
+    private final By viewBarcodeBtn = By.xpath("//input[@name='manufacturer_barcode' or contains(translate(@placeholder,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'barcode')]"
+            + "/following-sibling::*[contains(@class,'input-group-text')]//*[contains(normalize-space(.),'Xem') or contains(@class,'cursor-pointer')][1]");
+    private final By productBarcodeModal = By.xpath("//*[(@role='dialog' or contains(@class,'modal-content') or contains(@class,'modal-dialog'))"
+            + " and .//*[contains(translate(normalize-space(.),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'barcode')]]");
+    private final By productBarcodeRows = By.xpath("//*[(@role='dialog' or contains(@class,'modal-content') or contains(@class,'modal-dialog'))"
+            + " and .//*[contains(translate(normalize-space(.),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'barcode')]]"
+            + "//*[self::tr or self::td or self::div or self::span][normalize-space()]");
     private final By batchLotField = By.cssSelector("input[name='batch_lot_code']");
     private final By manufactureDateFields = By.cssSelector(
             "input[name*='manufact'], input[name*='mfg'], input[name*='production'], "
@@ -246,7 +253,7 @@ public class InboundProductWmsPage extends BasePage {
     }
 
     public void inputGoodQuantity(int quantity) {
-        type(goodQtyField, String.valueOf(quantity));
+        setEditableInputValue(goodQtyField, String.valueOf(quantity));
     }
 
     public void inputLostQuantity(int quantity) {
@@ -270,38 +277,106 @@ public class InboundProductWmsPage extends BasePage {
     }
 
     public void inputBarcode(String barcode) {
-        type(barcodeField, barcode);
+        setEditableInputValue(barcodeField, barcode);
+    }
+
+    public void inputBarcodeFromProductModal() {
+        inputBarcode(readBarcodeFromProductModal());
+    }
+
+    public String readBarcodeFromProductModal() {
+        waitForBarcodeFieldVisible();
+        return firstBarcodeFromProductModal();
     }
 
     public void inputBatchLotIfPresent() {
         List<WebElement> fields = all(batchLotField);
         if (!fields.isEmpty()) {
-            fields.get(0).clear();
-            fields.get(0).sendKeys(String.valueOf(System.currentTimeMillis()));
+            setInputValue(fields.get(0), String.valueOf(System.currentTimeMillis()));
+        }
+    }
+
+    public void clearBatchLotIfPresent() {
+        List<WebElement> fields = all(batchLotField);
+        if (!fields.isEmpty()) {
+            setInputValue(fields.get(0), "");
         }
     }
 
     public void inputSerialsIfPresent(int quantity, String sku) {
+        inputSerialsIfPresent(quantity, sku, Math.max(1, quantity));
+    }
+
+    public void inputSerialsIfPresent(int quantity, String sku, int serialCount) {
         WebElement button = firstVisibleEnabled(scanSerialBtn);
         if (button == null) {
             return;
         }
 
+        openSerialModal(button);
+        for (int index = 1; index <= serialCount; index++) {
+            addSerialToOpenModal(serialValue(sku, index), true);
+        }
+        if (serialCount >= Math.max(1, quantity)) {
+            confirmSerialModal();
+        } else {
+            confirmSerialModalIfPossible();
+        }
+    }
+
+    public void inputDuplicateSerialsIfPresent(String sku) {
+        WebElement button = firstVisibleEnabled(scanSerialBtn);
+        if (button == null) {
+            return;
+        }
+
+        openSerialModal(button);
+        String serial = serialValue(sku, 1);
+        addSerialToOpenModal(serial, true);
+        addSerialToOpenModal(serial, false);
+        clickVisibleEnabled(confirmSerialBtn);
+        try {
+            shortWait(2000).until(ExpectedConditions.invisibilityOfElementLocated(serialModal));
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    public boolean isSerialModalVisible() {
+        return firstVisibleEnabled(serialModal) != null;
+    }
+
+    private void openSerialModal(WebElement button) {
         jsClick(button);
         visible(serialModal);
-        int serialCount = Math.max(1, quantity);
-        for (int index = 1; index <= serialCount; index++) {
-            String serial = serialValue(sku, index);
-            int rowCountBeforeAdd = visibleCount(serialRows);
-            WebElement input = visible(serialInput);
-            input.click();
-            input.sendKeys(Keys.chord(Keys.CONTROL, "a"), Keys.DELETE);
-            input.sendKeys(serial);
-            click(addSerialBtn);
+    }
+
+    private void addSerialToOpenModal(String serial, boolean waitForAdd) {
+        int rowCountBeforeAdd = visibleCount(serialRows);
+        WebElement input = visible(serialInput);
+        setInputValue(input, serial);
+        click(addSerialBtn);
+        if (waitForAdd) {
             waitUntilSerialAdded(serial, rowCountBeforeAdd);
+        } else {
+            try {
+                Thread.sleep(300);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
+    }
+
+    private void confirmSerialModal() {
         clickVisibleEnabled(confirmSerialBtn);
         shortWait(3000).until(ExpectedConditions.invisibilityOfElementLocated(serialModal));
+    }
+
+    private void confirmSerialModalIfPossible() {
+        clickVisibleEnabled(confirmSerialBtn);
+        try {
+            shortWait(2000).until(ExpectedConditions.invisibilityOfElementLocated(serialModal));
+        } catch (RuntimeException ignored) {
+        }
     }
 
     public void inputShelfLifeDatesIfPresent() {
@@ -339,19 +414,100 @@ public class InboundProductWmsPage extends BasePage {
         fillDateIfPresent(expiryDateByLabel, expiryDateFields, fallbackExpiryDate);
     }
 
+    public void clearShelfLifeDatesIfPresent() {
+        clearDateIfPresent(manufactureDateByLabel, manufactureDateFields);
+        clearDateIfPresent(expiryDateByLabel, expiryDateFields);
+    }
+
+    public void inputMismatchedShelfLifeDatesIfPresent() {
+        int shelfLifeDays = Math.max(1, shelfLifeDays());
+        Integer minimumExpiryDays = minimumExpiryDays();
+        LocalDate manufactureDate = LocalDate.now();
+        LocalDate expiryDate = manufactureDate.plusDays(shelfLifeDays + 5L);
+        if (minimumExpiryDays != null && expiryDate.isBefore(LocalDate.now().plusDays(minimumExpiryDays))) {
+            expiryDate = LocalDate.now().plusDays(minimumExpiryDays + 5L);
+            manufactureDate = expiryDate.minusDays(shelfLifeDays + 5L);
+            if (manufactureDate.isAfter(LocalDate.now())) {
+                manufactureDate = LocalDate.now();
+            }
+        }
+        fillDateIfPresent(manufactureDateByLabel, manufactureDateFields, manufactureDate);
+        fillDateIfPresent(expiryDateByLabel, expiryDateFields, expiryDate);
+    }
+
     public void inputProductDimensions(POSku sku) {
         SystemDimensions redlineDimensions = systemDimensionsFromRedline();
-        fillIfEditable(lengthField, valueOrDefault(redlineDimensions.length, sku.goodsD(), "INBOUND_LENGTH"));
-        fillIfEditable(widthField, valueOrDefault(redlineDimensions.width, sku.goodsW(), "INBOUND_WIDTH"));
-        fillIfEditable(heightField, valueOrDefault(redlineDimensions.height, sku.goodsH(), "INBOUND_HEIGHT"));
-        fillIfEditable(weightField, valueOrDefault(redlineDimensions.weight, sku.goodsWeight(), "INBOUND_WEIGHT"));
+        fillNumberField(lengthField, "chieu dai", valueOrDefault(redlineDimensions.length, sku.goodsD(), "INBOUND_LENGTH"));
+        fillNumberField(widthField, "chieu rong", valueOrDefault(redlineDimensions.width, sku.goodsW(), "INBOUND_WIDTH"));
+        fillNumberField(heightField, "chieu cao", valueOrDefault(redlineDimensions.height, sku.goodsH(), "INBOUND_HEIGHT"));
+        fillNumberField(weightField, "can nang", valueOrDefault(redlineDimensions.weight, sku.goodsWeight(), "INBOUND_WEIGHT"));
     }
 
     public void inputProductDimensions(Number length, Number width, Number height, Number weight) {
-        fillIfEditable(lengthField, length);
-        fillIfEditable(widthField, width);
-        fillIfEditable(heightField, height);
-        fillIfEditable(weightField, weight);
+        fillNumberField(lengthField, "chieu dai", length);
+        fillNumberField(widthField, "chieu rong", width);
+        fillNumberField(heightField, "chieu cao", height);
+        fillNumberField(weightField, "can nang", weight);
+    }
+
+    public void inputProductDimensionsExcept(POSku sku, String omittedField) {
+        SystemDimensions redlineDimensions = systemDimensionsFromRedline();
+        if ("length".equals(omittedField)) {
+            clearNumberField(lengthField, "chieu dai");
+        } else {
+            fillNumberField(lengthField, "chieu dai", valueOrDefault(redlineDimensions.length, sku.goodsD(), "INBOUND_LENGTH"));
+        }
+        if ("width".equals(omittedField)) {
+            clearNumberField(widthField, "chieu rong");
+        } else {
+            fillNumberField(widthField, "chieu rong", valueOrDefault(redlineDimensions.width, sku.goodsW(), "INBOUND_WIDTH"));
+        }
+        if ("height".equals(omittedField)) {
+            clearNumberField(heightField, "chieu cao");
+        } else {
+            fillNumberField(heightField, "chieu cao", valueOrDefault(redlineDimensions.height, sku.goodsH(), "INBOUND_HEIGHT"));
+        }
+        if ("weight".equals(omittedField)) {
+            clearNumberField(weightField, "can nang");
+        } else {
+            fillNumberField(weightField, "can nang", valueOrDefault(redlineDimensions.weight, sku.goodsWeight(), "INBOUND_WEIGHT"));
+        }
+    }
+
+    public void clearProductDimension(String field) {
+        if ("length".equals(field)) {
+            clearNumberField(lengthField, "chieu dai");
+        } else if ("width".equals(field)) {
+            clearNumberField(widthField, "chieu rong");
+        } else if ("height".equals(field)) {
+            clearNumberField(heightField, "chieu cao");
+        } else if ("weight".equals(field)) {
+            clearNumberField(weightField, "can nang");
+        }
+    }
+
+    public String submitInspectExpectingValidation() {
+        clickConfirmInspectButton();
+        try {
+            shortWait(2000).until(driver -> isInspectionFormVisibleStrict() ? true : null);
+        } catch (RuntimeException ignored) {
+        }
+        if (isPostInspectReady()) {
+            throw new AssertionError("Expected inspection validation, but submit appears to have completed");
+        }
+        String validationText = visibleValidationText();
+        if (validationText.isBlank()) {
+            throw new AssertionError("Expected inspection validation, but no visible validation text was found");
+        }
+        return validationText;
+    }
+
+    public boolean isConfirmInspectDisabled() {
+        WebElement button = firstVisible(confirmInspectBtn);
+        if (button == null) {
+            button = firstVisible(submitInspectBtn);
+        }
+        return button != null && !button.isEnabled();
     }
 
     public void confirmInspect() {
@@ -530,6 +686,27 @@ public class InboundProductWmsPage extends BasePage {
         return hasVisibleProductRows() && !isAttachmentModalVisible() && !isInspectionFormVisibleStrict();
     }
 
+    public String visibleValidationText() {
+        String bodyText;
+        try {
+            bodyText = driver.findElement(By.tagName("body")).getText();
+        } catch (RuntimeException e) {
+            return "";
+        }
+        String normalized = normalizeForMatch(bodyText);
+        if (normalized.contains("vui long")
+                || normalized.contains("khong")
+                || normalized.contains("chenh lech")
+                || normalized.contains("barcode")
+                || normalized.contains("lon hon")
+                || normalized.contains("bat buoc")
+                || normalized.contains("serial")
+                || normalized.contains("trung")) {
+            return compactForLog(bodyText);
+        }
+        return "";
+    }
+
     private boolean clickBackAfterSubmittedDetailIfPresent() {
         if (isAttachmentModalVisible()
                 || isInspectionFormVisibleStrict()
@@ -633,6 +810,9 @@ public class InboundProductWmsPage extends BasePage {
                 lastInspectOpenFailure = "action button refreshed while clicking";
                 continue;
             }
+            if (waitUntilInspectionFormVisible()) {
+                return true;
+            }
             if (clickVisibleInspectMenuItemIfPresent()) {
                 return true;
             }
@@ -702,7 +882,13 @@ public class InboundProductWmsPage extends BasePage {
     }
 
     private boolean isInspectionFormVisibleStrict() {
-        if (firstEditable(goodQtyField) != null || firstEditable(barcodeField) != null) {
+        if (firstEditable(barcodeField) != null) {
+            return true;
+        }
+        if (isProductListViewVisible()) {
+            return false;
+        }
+        if (firstEditable(goodQtyField) != null && confirmInspectButtonIfPresent() != null) {
             return true;
         }
         return firstEditable(By.xpath("//textarea[contains(@name,'note') or contains(@placeholder,'ghi chú') or contains(@placeholder,'ghi chu')]")) != null
@@ -710,9 +896,6 @@ public class InboundProductWmsPage extends BasePage {
     }
 
     private boolean isProductListViewVisible() {
-        if (!hasVisibleProductRows()) {
-            return false;
-        }
         for (WebElement title : all(productListTitle)) {
             if (isDisplayed(title)) {
                 return true;
@@ -893,17 +1076,137 @@ public class InboundProductWmsPage extends BasePage {
         return value == null ? "" : value.replaceAll("[^A-Za-z0-9]", "").toLowerCase();
     }
 
-    private void fillIfEditable(By locator, Number value) {
-        if (value == null) {
+    private void fillNumberField(By locator, String normalizedLabel, Number value) {
+        if (fillIfEditable(locator, value)) {
             return;
+        }
+        if (value != null && fillInputNearNormalizedLabel(normalizedLabel, String.valueOf(value))) {
+            return;
+        }
+        System.out.println("Numeric field not found for label: " + normalizedLabel);
+    }
+
+    private void clearNumberField(By locator, String normalizedLabel) {
+        if (clearIfEditable(locator)) {
+            return;
+        }
+        if (clearInputNearNormalizedLabel(normalizedLabel)) {
+            return;
+        }
+        System.out.println("Numeric field not found to clear for label: " + normalizedLabel);
+    }
+
+    private boolean fillIfEditable(By locator, Number value) {
+        if (value == null) {
+            return false;
         }
         for (WebElement input : all(locator)) {
             if (isEditable(input)) {
-                input.clear();
-                input.sendKeys(String.valueOf(value));
-                return;
+                setInputValue(input, String.valueOf(value));
+                return true;
             }
         }
+        return false;
+    }
+
+    private void setEditableInputValue(By locator, String value) {
+        WebElement input = shortWait(5000).until(driver -> {
+            WebElement candidate = firstEditable(locator);
+            return candidate == null ? null : candidate;
+        });
+        setInputValue(input, value);
+    }
+
+    private boolean clearIfEditable(By locator) {
+        for (WebElement input : all(locator)) {
+            if (isEditable(input)) {
+                setInputValue(input, "");
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean fillInputNearNormalizedLabel(String normalizedLabel, String value) {
+        Object filled = ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
+                "const target = arguments[0];"
+                        + "const value = String(arguments[1]);"
+                        + "const norm = text => (text || '')"
+                        + "  .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')"
+                        + "  .replace(/đ/g, 'd').replace(/Đ/g, 'D')"
+                        + "  .toLowerCase().replace(/\\s+/g, ' ').trim();"
+                        + "const visible = el => {"
+                        + "  const style = window.getComputedStyle(el);"
+                        + "  const rect = el.getBoundingClientRect();"
+                        + "  return style.visibility !== 'hidden' && style.display !== 'none'"
+                        + "    && rect.width > 0 && rect.height > 0;"
+                        + "};"
+                        + "const labels = Array.from(document.querySelectorAll('label,div,span,p'))"
+                        + "  .filter(visible)"
+                        + "  .filter(el => norm(el.innerText || el.textContent).includes(target));"
+                        + "const inputs = Array.from(document.querySelectorAll('input'))"
+                        + "  .filter(visible)"
+                        + "  .filter(el => !el.disabled && !el.readOnly);"
+                        + "for (const label of labels) {"
+                        + "  const lr = label.getBoundingClientRect();"
+                        + "  const candidates = inputs.map(input => ({input, rect: input.getBoundingClientRect()}))"
+                        + "    .filter(item => item.rect.top >= lr.top - 12 && item.rect.top <= lr.bottom + 90)"
+                        + "    .sort((a, b) => Math.abs(a.rect.left - lr.left) + Math.abs(a.rect.top - lr.bottom)"
+                        + "      - Math.abs(b.rect.left - lr.left) - Math.abs(b.rect.top - lr.bottom));"
+                        + "  if (!candidates.length) continue;"
+                        + "  const input = candidates[0].input;"
+                        + "  input.scrollIntoView({block:'center', inline:'center'});"
+                        + "  input.focus();"
+                        + "  input.value = value;"
+                        + "  for (const type of ['input', 'change', 'blur']) {"
+                        + "    input.dispatchEvent(new Event(type, {bubbles: true}));"
+                        + "  }"
+                        + "  return true;"
+                        + "}"
+                        + "return false;",
+                normalizedLabel,
+                value);
+        return Boolean.TRUE.equals(filled);
+    }
+
+    private boolean clearInputNearNormalizedLabel(String normalizedLabel) {
+        Object cleared = ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
+                "const target = arguments[0];"
+                        + "const norm = text => (text || '')"
+                        + "  .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')"
+                        + "  .replace(/đ/g, 'd').replace(/Đ/g, 'D')"
+                        + "  .toLowerCase().replace(/\\s+/g, ' ').trim();"
+                        + "const visible = el => {"
+                        + "  const style = window.getComputedStyle(el);"
+                        + "  const rect = el.getBoundingClientRect();"
+                        + "  return style.visibility !== 'hidden' && style.display !== 'none'"
+                        + "    && rect.width > 0 && rect.height > 0;"
+                        + "};"
+                        + "const labels = Array.from(document.querySelectorAll('label,div,span,p'))"
+                        + "  .filter(visible)"
+                        + "  .filter(el => norm(el.innerText || el.textContent).includes(target));"
+                        + "const inputs = Array.from(document.querySelectorAll('input'))"
+                        + "  .filter(visible)"
+                        + "  .filter(el => !el.disabled && !el.readOnly);"
+                        + "for (const label of labels) {"
+                        + "  const lr = label.getBoundingClientRect();"
+                        + "  const candidates = inputs.map(input => ({input, rect: input.getBoundingClientRect()}))"
+                        + "    .filter(item => item.rect.top >= lr.top - 12 && item.rect.top <= lr.bottom + 90)"
+                        + "    .sort((a, b) => Math.abs(a.rect.left - lr.left) + Math.abs(a.rect.top - lr.bottom)"
+                        + "      - Math.abs(b.rect.left - lr.left) - Math.abs(b.rect.top - lr.bottom));"
+                        + "  if (!candidates.length) continue;"
+                        + "  const input = candidates[0].input;"
+                        + "  input.scrollIntoView({block:'center', inline:'center'});"
+                        + "  input.focus();"
+                        + "  input.value = '';"
+                        + "  for (const type of ['input', 'change', 'blur']) {"
+                        + "    input.dispatchEvent(new Event(type, {bubbles: true}));"
+                        + "  }"
+                        + "  return true;"
+                        + "}"
+                        + "return false;",
+                normalizedLabel);
+        return Boolean.TRUE.equals(cleared);
     }
 
     private Number valueOrDefault(Number value, String key) {
@@ -977,6 +1280,25 @@ public class InboundProductWmsPage extends BasePage {
         }
         setInputValue(input, displayDate);
         return !inputValue(input).isBlank();
+    }
+
+    private boolean clearDateIfPresent(By primaryLocator, By fallbackLocator) {
+        WebElement input = firstVisibleEnabled(primaryLocator);
+        if (input == null) {
+            input = firstVisibleEnabled(fallbackLocator);
+        }
+        if (input == null) {
+            return false;
+        }
+        try {
+            ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
+                    "arguments[0].scrollIntoView({block:'center'});"
+                            + "if (arguments[0]._flatpickr) { arguments[0]._flatpickr.clear(); }",
+                    input);
+        } catch (RuntimeException ignored) {
+        }
+        setInputValue(input, "");
+        return inputValue(input).isBlank();
     }
 
     private WebElement firstEditable(By locator) {
@@ -1057,6 +1379,293 @@ public class InboundProductWmsPage extends BasePage {
 
     private String serialValue(String sku, int index) {
         return normalized(sku).toUpperCase() + "-SERIAL-" + System.currentTimeMillis() + "-" + index;
+    }
+
+    private String firstBarcodeFromProductModal() {
+        if (!openProductBarcodeModal()) {
+            throw new IllegalStateException("Clicked barcode view button but barcode modal did not open. Buttons="
+                    + visibleButtonSummary());
+        }
+
+        String barcode = waitForBarcodeFromOpenModal();
+        closeProductBarcodeModal();
+        if (barcode == null || barcode.isBlank()) {
+            throw new IllegalStateException("Product barcode modal did not contain a usable barcode");
+        }
+        System.out.println("Using product barcode from WMS modal: " + barcode);
+        return barcode;
+    }
+
+    private boolean openProductBarcodeModal() {
+        for (WebElement button : all(viewBarcodeBtn)) {
+            if (!isDisplayed(button) || !button.isEnabled()) {
+                continue;
+            }
+            if (clickBarcodeViewElementAndWait(button)) {
+                return true;
+            }
+            WebElement parent = parentElement(button);
+            if (parent != null && clickBarcodeViewElementAndWait(parent)) {
+                return true;
+            }
+        }
+        if (clickNearestBarcodeViewButton()) {
+            return waitUntilProductBarcodeModalVisible();
+        }
+        return false;
+    }
+
+    private boolean clickBarcodeViewElementAndWait(WebElement element) {
+        try {
+            new org.openqa.selenium.interactions.Actions(driver)
+                    .moveToElement(element)
+                    .click()
+                    .perform();
+        } catch (RuntimeException e) {
+            try {
+                element.click();
+            } catch (RuntimeException ignored) {
+                try {
+                    jsClick(element);
+                } catch (RuntimeException ignoredToo) {
+                    return false;
+                }
+            }
+        }
+        return waitUntilProductBarcodeModalVisible();
+    }
+
+    private WebElement parentElement(WebElement element) {
+        try {
+            Object parent = ((org.openqa.selenium.JavascriptExecutor) driver)
+                    .executeScript("return arguments[0].parentElement;", element);
+            return parent instanceof WebElement ? (WebElement) parent : null;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private String waitForBarcodeFromOpenModal() {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (System.currentTimeMillis() < deadline) {
+            String fromRows = firstBarcodeFromRows();
+            if (fromRows != null) {
+                return fromRows;
+            }
+            String fromModal = firstBarcodeInText(visibleText(productBarcodeModal));
+            if (fromModal != null) {
+                return fromModal;
+            }
+            String fromDom = firstBarcodeInText(visibleDomText(productBarcodeModal));
+            if (fromDom != null) {
+                return fromDom;
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        String modalText = compactForLog(visibleText(productBarcodeModal) + " " + visibleDomText(productBarcodeModal));
+        throw new IllegalStateException("Product barcode modal is open but no barcode was parsed. Modal=" + modalText);
+    }
+
+    private void waitForBarcodeFieldVisible() {
+        shortWait(5000).until(driver -> firstVisibleEnabled(barcodeField) != null ? true : null);
+    }
+
+    private boolean clickNearestBarcodeViewButton() {
+        WebElement input = firstVisibleEnabled(barcodeField);
+        if (input == null) {
+            return false;
+        }
+        Object clicked = ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
+                "const input = arguments[0];"
+                        + "const norm = value => (value || '')"
+                        + "  .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')"
+                        + "  .replace(/đ/g, 'd').replace(/Đ/g, 'D')"
+                        + "  .toLowerCase().replace(/\\s+/g, ' ').trim();"
+                        + "const visible = el => {"
+                        + "  if (!el) return false;"
+                        + "  const style = window.getComputedStyle(el);"
+                        + "  const rect = el.getBoundingClientRect();"
+                        + "  return style.visibility !== 'hidden' && style.display !== 'none'"
+                        + "    && rect.width > 0 && rect.height > 0 && !el.disabled;"
+                        + "};"
+                        + "const group = input.closest('.input-group') || input.parentElement;"
+                        + "const candidates = Array.from(group.querySelectorAll('.input-group-text span, .input-group-text, [class*=\"cursor\"]'))"
+                        + "  .filter(visible)"
+                        + "  .filter(el => norm(el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('title')).includes('xem')"
+                        + "    || (el.getAttribute('class') || '').includes('cursor-pointer')"
+                        + "    || !!el.querySelector('i[class*=\"eye\"]'));"
+                        + "candidates.sort((a, b) => (norm(b.innerText || b.textContent).includes('xem') ? 1 : 0)"
+                        + "  - (norm(a.innerText || a.textContent).includes('xem') ? 1 : 0));"
+                        + "if (!candidates.length) return false;"
+                        + "const button = candidates[0];"
+                        + "button.scrollIntoView({block:'center', inline:'center'});"
+                        + "for (const type of ['pointerdown','mousedown','pointerup','mouseup','click']) {"
+                        + "  button.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, view: window}));"
+                        + "}"
+                        + "return true;",
+                input);
+        return Boolean.TRUE.equals(clicked);
+    }
+
+    private boolean waitUntilProductBarcodeModalVisible() {
+        try {
+            shortWait(5000).until(driver -> isProductBarcodeModalActuallyVisible() ? true : null);
+            return true;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private boolean isProductBarcodeModalActuallyVisible() {
+        if (firstVisibleEnabled(productBarcodeModal) != null) {
+            return true;
+        }
+        Object visible = ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
+                "const norm = value => (value || '')"
+                        + "  .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')"
+                        + "  .replace(/đ/g, 'd').replace(/Đ/g, 'D')"
+                        + "  .toLowerCase().replace(/\\s+/g, ' ').trim();"
+                        + "const shown = el => {"
+                        + "  const style = window.getComputedStyle(el);"
+                        + "  const rect = el.getBoundingClientRect();"
+                        + "  return style.visibility !== 'hidden' && style.display !== 'none'"
+                        + "    && rect.width > 0 && rect.height > 0;"
+                        + "};"
+                        + "return Array.from(document.querySelectorAll('[role=\"dialog\"], .modal-content, .modal-dialog, .modal'))"
+                        + "  .some(el => shown(el) && norm(el.innerText || el.textContent).includes('danh sach barcode'));");
+        return Boolean.TRUE.equals(visible);
+    }
+
+    private String firstBarcodeFromRows() {
+        for (WebElement row : all(productBarcodeRows)) {
+            if (!isDisplayed(row)) {
+                continue;
+            }
+            String barcode = firstBarcodeInText(safeText(row));
+            if (barcode != null) {
+                return barcode;
+            }
+        }
+        return null;
+    }
+
+    private WebElement firstVisible(By locator) {
+        for (WebElement element : all(locator)) {
+            if (isDisplayed(element)) {
+                return element;
+            }
+        }
+        return null;
+    }
+
+    private String firstBarcodeInText(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        Matcher matcher = Pattern.compile("\\b(?:\\d[\\s\\-]*){6,}\\b").matcher(text);
+        if (matcher.find()) {
+            String barcode = matcher.group().replaceAll("\\D+", "");
+            return barcode.length() >= 6 ? barcode : null;
+        }
+
+        Matcher alphaNumeric = Pattern.compile("\\b[A-Za-z0-9][A-Za-z0-9_-]{3,}\\b").matcher(text);
+        while (alphaNumeric.find()) {
+            String candidate = alphaNumeric.group();
+            if (!isBarcodeHeaderToken(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private boolean isBarcodeHeaderToken(String value) {
+        String token = normalized(value);
+        return token.equals("barcode")
+                || token.equals("danh")
+                || token.equals("sach")
+                || token.equals("theo")
+                || token.equals("san")
+                || token.equals("pham")
+                || token.equals("ma")
+                || token.equals("khong")
+                || token.equals("ket")
+                || token.equals("qua")
+                || token.equals("phu")
+                || token.equals("hop")
+                || token.equals("truy")
+                || token.equals("van")
+                || token.equals("cua")
+                || token.equals("ban");
+    }
+
+    private String visibleDomText(By locator) {
+        String fromBarcodeModal = barcodeModalTextFromDom();
+        if (!fromBarcodeModal.isBlank()) {
+            return fromBarcodeModal;
+        }
+        for (WebElement element : all(locator)) {
+            if (!isDisplayed(element)) {
+                continue;
+            }
+            Object value = ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
+                    "return [arguments[0].innerText, arguments[0].textContent, arguments[0].outerHTML]"
+                            + ".filter(Boolean).join(' ');",
+                    element);
+            return value == null ? "" : value.toString();
+        }
+        return "";
+    }
+
+    private String barcodeModalTextFromDom() {
+        Object value = ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
+                "const norm = value => (value || '')"
+                        + "  .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')"
+                        + "  .replace(/đ/g, 'd').replace(/Đ/g, 'D')"
+                        + "  .toLowerCase().replace(/\\s+/g, ' ').trim();"
+                        + "const shown = el => {"
+                        + "  const style = window.getComputedStyle(el);"
+                        + "  const rect = el.getBoundingClientRect();"
+                        + "  return style.visibility !== 'hidden' && style.display !== 'none'"
+                        + "    && rect.width > 0 && rect.height > 0;"
+                        + "};"
+                        + "const modal = Array.from(document.querySelectorAll('[role=\"dialog\"], .modal-content, .modal-dialog, .modal'))"
+                        + "  .filter(shown)"
+                        + "  .find(el => norm(el.innerText || el.textContent).includes('danh sach barcode'));"
+                        + "return modal ? [modal.innerText, modal.textContent, modal.outerHTML].filter(Boolean).join(' ') : '';"
+        );
+        return value == null ? "" : value.toString();
+    }
+
+    private String compactForLog(String value) {
+        if (value == null) {
+            return "";
+        }
+        String compact = value.replaceAll("\\s+", " ").trim();
+        return compact.length() <= 1000 ? compact : compact.substring(0, 1000) + "...";
+    }
+
+    private void closeProductBarcodeModal() {
+        try {
+            driver.switchTo().activeElement().sendKeys(Keys.ESCAPE);
+            shortWait(2000).until(ExpectedConditions.invisibilityOfElementLocated(productBarcodeModal));
+            return;
+        } catch (RuntimeException ignored) {
+        }
+        for (WebElement button : all(By.cssSelector(".modal button"))) {
+            if (isDisplayed(button) && button.isEnabled()) {
+                try {
+                    jsClick(button);
+                    shortWait(2000).until(ExpectedConditions.invisibilityOfElementLocated(productBarcodeModal));
+                    return;
+                } catch (RuntimeException ignored) {
+                }
+            }
+        }
     }
 
     private void waitUntilSerialAdded(String serial, int previousRowCount) {

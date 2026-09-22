@@ -1,7 +1,13 @@
 {
   "inboundPackages": [
     {
-      "products": [{ "sku": "YSL_MS", "quantity": 2000 }]
+      "products": [
+        { "sku": "FIFO-AT", "quantity": 2 },
+        { "sku": "LIFO-AT", "quantity": 2 },
+        { "sku": "FEFO-AT", "quantity": 2 },
+        { "sku": "SERIAL-AT", "quantity": 2 },
+        { "sku": "BATCH-AT", "quantity": 2 }
+      ]
     }
   ],
   "orderProducts": [
