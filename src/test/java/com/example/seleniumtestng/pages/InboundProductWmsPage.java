@@ -15,6 +15,10 @@ import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 
 public class InboundProductWmsPage extends BasePage {
+    private static final long POST_INSPECT_WAIT_MS = 3500;
+    private static final long POST_INSPECT_RECOVERY_WAIT_MS = 6000;
+    private static final long ATTACHMENT_WAIT_MS = 2500;
+
     private final By scanPoField = By.xpath("//input[contains(@placeholder,'PO')]");
     private final By scanBoxField = By.xpath("//input["
             + "contains(@placeholder,'Kiện') "
@@ -511,7 +515,7 @@ public class InboundProductWmsPage extends BasePage {
     }
 
     public void confirmInspect() {
-        if (!tryConfirmInspectAndReturnToScanBox(5000)) {
+        if (!tryConfirmInspectAndReturnToScanBox(POST_INSPECT_WAIT_MS)) {
             ensureReturnedAfterInspectSubmit();
         }
     }
@@ -526,8 +530,8 @@ public class InboundProductWmsPage extends BasePage {
             Integer shelfLifeDays = shelfLifeDaysFromWarning();
             if (shelfLifeDays != null) {
                 inputShelfLifeDatesIfPresent();
-                if (!tryConfirmInspectAndReturnToScanBox(5000)) {
-                    if (retryInspectSubmitIfFormStillOpen(15000)) {
+                if (!tryConfirmInspectAndReturnToScanBox(POST_INSPECT_WAIT_MS)) {
+                    if (retryInspectSubmitIfFormStillOpen(POST_INSPECT_RECOVERY_WAIT_MS)) {
                         return;
                     }
                     System.out.println("Inspect submit did not return to scan box after shelf-life retry. Buttons="
@@ -536,8 +540,8 @@ public class InboundProductWmsPage extends BasePage {
                 }
                 return;
             }
-            if (!waitForScanBoxOrSkipAttachment(5000)) {
-                if (retryInspectSubmitIfFormStillOpen(15000)) {
+            if (!waitForScanBoxOrSkipAttachment(POST_INSPECT_WAIT_MS)) {
+                if (retryInspectSubmitIfFormStillOpen(POST_INSPECT_RECOVERY_WAIT_MS)) {
                     return;
                 }
                 System.out.println("Inspect submit did not return to scan box. Buttons=" + visibleButtonSummary());
@@ -547,8 +551,8 @@ public class InboundProductWmsPage extends BasePage {
         }
         inputShelfLifeDatesIfPresent();
         inputProductDimensions(sku);
-        if (!tryConfirmInspectAndReturnToScanBox(5000)) {
-            if (retryInspectSubmitIfFormStillOpen(15000)) {
+        if (!tryConfirmInspectAndReturnToScanBox(POST_INSPECT_WAIT_MS)) {
+            if (retryInspectSubmitIfFormStillOpen(POST_INSPECT_RECOVERY_WAIT_MS)) {
                 return;
             }
             System.out.println("Inspect submit did not return to scan box after redline retry. Buttons="
@@ -569,7 +573,7 @@ public class InboundProductWmsPage extends BasePage {
         }
         if (button == null) {
             System.out.println("Visible buttons before confirm inspect: " + visibleButtonSummary());
-            button = shortWait(5000).until(driver -> {
+            button = shortWait(2500).until(driver -> {
                 WebElement candidate = firstVisibleEnabled(confirmInspectBtn);
                 if (candidate == null) {
                     candidate = firstVisibleEnabled(submitInspectBtn);
@@ -642,9 +646,9 @@ public class InboundProductWmsPage extends BasePage {
 
     private boolean waitUntilAttachmentModalClosed() {
         try {
-            shortWait(5000).until(driver -> !isAttachmentModalVisible() ? true : null);
+            shortWait(ATTACHMENT_WAIT_MS).until(driver -> !isAttachmentModalVisible() ? true : null);
             boolean[] clickedBack = {false};
-            return shortWait(5000).until(driver -> {
+            return shortWait(ATTACHMENT_WAIT_MS).until(driver -> {
                 if (isPostInspectReady()) {
                     return true;
                 }
@@ -661,7 +665,7 @@ public class InboundProductWmsPage extends BasePage {
     private void ensureReturnedAfterInspectSubmit() {
         try {
             boolean[] clickedBack = {false};
-            shortWait(5000).until(driver -> {
+            shortWait(POST_INSPECT_RECOVERY_WAIT_MS).until(driver -> {
                 if (isPostInspectReady()) {
                     return true;
                 }
@@ -730,7 +734,7 @@ public class InboundProductWmsPage extends BasePage {
     }
 
     private void clickConfirmDialogIfPresent() {
-        WebElement confirmButton = shortWait(2500).until(driver -> {
+        WebElement confirmButton = shortWait(900).until(driver -> {
             WebElement button = firstVisibleEnabled(confirmSkipAttachmentBtn);
             return button == null ? null : button;
         });
@@ -771,8 +775,12 @@ public class InboundProductWmsPage extends BasePage {
     }
 
     private boolean clickVisibleInspectMenuItemIfPresent() {
+        return clickVisibleInspectMenuItemIfPresent(1000);
+    }
+
+    private boolean clickVisibleInspectMenuItemIfPresent(long timeoutMillis) {
         try {
-            return shortWait(1000).until(driver -> {
+            return shortWait(timeoutMillis).until(driver -> {
                 List<WebElement> inspectButtons = all(inspectMenuItem);
                 for (WebElement button : inspectButtons) {
                     if (isDisplayed(button)) {
@@ -810,10 +818,13 @@ public class InboundProductWmsPage extends BasePage {
                 lastInspectOpenFailure = "action button refreshed while clicking";
                 continue;
             }
-            if (waitUntilInspectionFormVisible()) {
+            if (clickVisibleInspectMenuItemIfPresent(400)) {
                 return true;
             }
-            if (clickVisibleInspectMenuItemIfPresent()) {
+            if (waitUntilInspectionFormVisible(500)) {
+                return true;
+            }
+            if (clickVisibleInspectMenuItemIfPresent(1000)) {
                 return true;
             }
             closeOpenMenu();
@@ -867,8 +878,12 @@ public class InboundProductWmsPage extends BasePage {
     }
 
     private boolean waitUntilInspectionFormVisible() {
+        return waitUntilInspectionFormVisible(3000);
+    }
+
+    private boolean waitUntilInspectionFormVisible(long timeoutMillis) {
         try {
-            return shortWait(3000).until(driver -> isInspectionFormVisible() ? true : null);
+            return shortWait(timeoutMillis).until(driver -> isInspectionFormVisible() ? true : null);
         } catch (RuntimeException e) {
             return false;
         }

@@ -4,6 +4,9 @@
 # Maven build artifacts
 target/
 
+# Local Java runtime
+.jdk/
+
 # Selenium test artifacts
 screenshots/
 downloads/

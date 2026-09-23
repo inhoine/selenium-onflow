@@ -22,8 +22,8 @@ Automation project for OMS/WMS flows using Java, Selenium WebDriver, Maven, and 
 
 ## Requirements
 
-- Java 25+
-- Maven
+- Java 25 LTS (the Maven compiler target is release 25)
+- Maven 3.9+
 - Google Chrome
 
 Selenium Manager is used by Selenium 4 to resolve browser drivers automatically.

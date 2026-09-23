@@ -297,19 +297,27 @@ public class InboundProductTest extends BaseTest {
             String inboundCode,
             String token) {
         List<String> remainingBoxCodes = new ArrayList<>();
-        for (int attempt = 1; attempt <= 5; attempt++) {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (System.currentTimeMillis() <= deadline) {
             remainingBoxCodes = wmsApiClient.getPendingPoBoxes(inboundCode, token);
             if (remainingBoxCodes.isEmpty()) {
                 return remainingBoxCodes;
             }
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+            if (!sleepBriefly(250)) {
                 return remainingBoxCodes;
             }
         }
         return remainingBoxCodes;
+    }
+
+    private boolean sleepBriefly(long millis) {
+        try {
+            Thread.sleep(millis);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     private InboundProductWmsPage openInspectionAndScanPo(String inboundCode) {
