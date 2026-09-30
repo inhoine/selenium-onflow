@@ -36,8 +36,11 @@ public class CreateInboundProductPage extends BasePage {
     }
 
     public void openCreateInboundForm() {
-        click(dropdownInboundBtn);
-        click(createInboundMenuItem);
+        clickFresh(dropdownInboundBtn, "create inbound dropdown");
+        if (isCreateInboundFormVisible(1500)) {
+            return;
+        }
+        clickFresh(createInboundMenuItem, "create inbound menu item");
     }
 
     public void selectWarehouse(String keyword) {
@@ -338,6 +341,59 @@ public class CreateInboundProductPage extends BasePage {
                     return text + " => " + normalizeForMatch(text);
                 })
                 .collect(Collectors.joining(" | "));
+    }
+
+    private void clickFresh(By locator, String actionName) {
+        RuntimeException lastError = null;
+        for (int attempt = 1; attempt <= 4; attempt++) {
+            try {
+                WebElement element = shortWait(3000).until(driver -> {
+                    for (WebElement candidate : all(locator)) {
+                        if (displayed(candidate) && candidate.isEnabled()) {
+                            return candidate;
+                        }
+                    }
+                    return null;
+                });
+                try {
+                    element.click();
+                } catch (RuntimeException e) {
+                    jsClick(element);
+                }
+                return;
+            } catch (RuntimeException e) {
+                lastError = e;
+            }
+        }
+        throw new TimeoutException("Could not click " + actionName + ". Buttons=" + buttonSummary(), lastError);
+    }
+
+    private boolean isCreateInboundFormVisible(long timeoutMillis) {
+        try {
+            return shortWait(timeoutMillis).until(driver -> {
+                if (displayedAny(warehouseInput) || displayedAny(supplierInput) || displayedAny(referenceField)) {
+                    return true;
+                }
+                String bodyText = normalizeForMatch(driver.findElement(By.tagName("body")).getText());
+                return bodyText.contains("chon dia chi lay hang")
+                        || bodyText.contains("chon nha cung cap")
+                        || bodyText.contains("ma tham chieu")
+                        || bodyText.contains("them kien")
+                        ? true
+                        : null;
+            });
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private boolean displayedAny(By locator) {
+        for (WebElement element : all(locator)) {
+            if (displayed(element)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<WebElement> visibleElements(By locator) {

@@ -2,11 +2,11 @@
   "inboundPackages": [
     {
       "products": [
-        { "sku": "FIFO-AT", "quantity": 2 },
-        { "sku": "LIFO-AT", "quantity": 2 },
-        { "sku": "FEFO-AT", "quantity": 2 },
-        { "sku": "SERIAL-AT", "quantity": 2 },
-        { "sku": "BATCH-AT", "quantity": 2 }
+        { "sku": "FIFO-AT", "quantity": 10 },
+        { "sku": "LIFO-AT", "quantity": 10 },
+        { "sku": "FEFO-AT", "quantity": 10 },
+        { "sku": "SERIAL-AT", "quantity": 10 },
+        { "sku": "BATCH-AT", "quantity": 10 }
       ]
     }
   ],
