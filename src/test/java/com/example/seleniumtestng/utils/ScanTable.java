@@ -16,15 +16,22 @@ public class ScanTable extends BasePage {
 
     public void scan(String tableCode) {
         WebElement input = wait.until(driver -> findTableOrStationInputNow());
-        scanIntoTableOrStationInput(input, tableCode);
+        if (!scanIntoTableOrStationInput(input, tableCode)) {
+            throw new IllegalStateException("Table/station scan modal did not close after scanning code: " + tableCode);
+        }
     }
 
     public boolean scanIfPresent(String tableCode) {
         try {
-            WebElement input = shortWait(2000).until(driver -> findTableOrStationInputNow());
-            scanIntoTableOrStationInput(input, tableCode);
+            WebElement input = shortWait(800).until(driver -> findTableOrStationInputNow());
+            if (!scanIntoTableOrStationInput(input, tableCode)) {
+                throw new IllegalStateException("Table/station scan modal did not close after scanning code: " + tableCode);
+            }
             return true;
         } catch (RuntimeException e) {
+            if (isTableOrStationModalVisible()) {
+                throw e;
+            }
             System.out.println("Skip table scan because a packing table already appears to be selected");
             return false;
         }
@@ -56,21 +63,45 @@ public class ScanTable extends BasePage {
         return null;
     }
 
-    private void scanIntoTableOrStationInput(WebElement input, String tableCode) {
-        input.clear();
-        input.sendKeys(tableCode, Keys.ENTER);
-        WebElement connectButton = findConnectTableOrStationButton(1000);
-        if (connectButton != null) {
-            jsClick(connectButton);
+    private boolean scanIntoTableOrStationInput(WebElement input, String tableCode) {
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                input = findTableOrStationInputNow();
+                if (input == null) {
+                    return !isTableOrStationModalVisible();
+                }
+                input.click();
+                input.sendKeys(Keys.chord(Keys.CONTROL, "a"), Keys.DELETE);
+                input.sendKeys(tableCode, Keys.ENTER);
+                if (waitForTableOrStationModalToClose()) {
+                    System.out.println("Scanned table/station code: " + tableCode);
+                    return true;
+                }
+
+                input = findTableOrStationInputNow();
+                if (input != null) {
+                    setInputValue(input, tableCode);
+                    input.sendKeys(Keys.ENTER);
+                    WebElement connectButton = findConnectTableOrStationButton(500);
+                    if (connectButton != null) {
+                        jsClick(connectButton);
+                    }
+                    if (waitForTableOrStationModalToClose()) {
+                        System.out.println("Scanned table/station code: " + tableCode);
+                        return true;
+                    }
+                }
+            } catch (RuntimeException ignored) {
+            }
         }
-        waitForTableOrStationModalToClose();
-        System.out.println("Scanned table/station code: " + tableCode);
+        System.out.println("Table/station scan modal is still visible after scan attempt");
+        return false;
     }
 
     private WebElement findConnectTableOrStationButton(long timeoutMillis) {
         try {
             return shortWait(timeoutMillis).until(driver -> {
-                for (WebElement button : driver.findElements(By.cssSelector(".modal.show button"))) {
+                for (WebElement button : driver.findElements(By.cssSelector(".modal.show button, .modal.show [role='button']"))) {
                     try {
                         if (!button.isDisplayed() || !button.isEnabled()) {
                             continue;
@@ -78,6 +109,7 @@ public class ScanTable extends BasePage {
                         String text = normalizeForMatch(button.getText());
                         if (text.contains("ket noi tram dong hang")
                                 || text.contains("ket noi ban dong goi")
+                                || text.contains("quet ma")
                                 || text.equals("xac nhan")) {
                             return button;
                         }
@@ -91,25 +123,29 @@ public class ScanTable extends BasePage {
         }
     }
 
-    private void waitForTableOrStationModalToClose() {
+    private boolean waitForTableOrStationModalToClose() {
         try {
-            shortWait(5000).until(driver -> {
-                for (WebElement modal : driver.findElements(visibleModal)) {
-                    try {
-                        String text = normalizeForMatch(modal.getText());
-                        if (modal.isDisplayed()
-                                && (text.contains("quet ma tram dong hang")
-                                || text.contains("ma tram dong hang")
-                                || text.contains("ma ban"))) {
-                            return null;
-                        }
-                    } catch (RuntimeException ignored) {
-                    }
-                }
-                return true;
-            });
+            return shortWait(2500).until(driver -> !isTableOrStationModalVisible() ? true : null);
         } catch (RuntimeException ignored) {
-            System.out.println("Table/station scan modal is still visible after scan attempt");
+            return false;
         }
+    }
+
+    private boolean isTableOrStationModalVisible() {
+        for (WebElement modal : driver.findElements(visibleModal)) {
+            try {
+                String text = normalizeForMatch(modal.getText());
+                if (modal.isDisplayed()
+                        && (text.contains("quet ma tram dong hang")
+                        || text.contains("ma tram dong hang")
+                        || text.contains("quet ma ban")
+                        || text.contains("ma ban kiem hang")
+                        || text.contains("ma ban"))) {
+                    return true;
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+        return false;
     }
 }
