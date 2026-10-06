@@ -20,7 +20,7 @@ public abstract class BaseTest {
 
     @BeforeMethod(alwaysRun = true)
     @Parameters("browser")
-    public void setUp(@Optional("chrome") String browser) {
+    public void setUp(@Optional("") String browser) {
         driver = DriverFactory.create(browser);
     }
 

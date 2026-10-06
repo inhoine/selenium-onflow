@@ -1,6 +1,7 @@
 package com.example.seleniumtestng.tests;
 
 import com.example.seleniumtestng.base.DriverFactory;
+import com.example.seleniumtestng.config.ConfigReader;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import java.io.IOException;
@@ -1264,32 +1265,32 @@ public class WmsCurrentUiInspectorTest {
     }
 
     private static String requiredEnv(String key) {
-        String value = System.getenv(key);
+        String value = ConfigReader.get(key);
         if (value == null || value.trim().isEmpty()) {
-            throw new IllegalStateException("Missing required environment variable: " + key);
+            throw new IllegalStateException("Missing required config value: " + key);
         }
         return value;
     }
 
     private static String requiredAnyEnv(String primaryKey, String fallbackKey) {
-        String value = System.getenv(primaryKey);
+        String value = ConfigReader.get(primaryKey);
         if (value != null && !value.trim().isEmpty()) {
             return value;
         }
-        value = System.getenv(fallbackKey);
+        value = ConfigReader.get(fallbackKey);
         if (value != null && !value.trim().isEmpty()) {
             return value;
         }
-        throw new IllegalStateException("Missing required environment variable: " + primaryKey + " or " + fallbackKey);
+        throw new IllegalStateException("Missing required config value: " + primaryKey + " or " + fallbackKey);
     }
 
     private static String envOrDefault(String key, String defaultValue) {
-        String value = System.getenv(key);
+        String value = ConfigReader.get(key);
         return value == null || value.trim().isEmpty() ? defaultValue : value;
     }
 
     private static long longEnvOrDefault(String key, long defaultValue) {
-        String value = System.getenv(key);
+        String value = ConfigReader.get(key);
         if (value == null || value.trim().isEmpty()) {
             return defaultValue;
         }

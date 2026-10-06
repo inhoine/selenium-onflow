@@ -24,7 +24,7 @@ Automation project for OMS/WMS flows using Java, Selenium WebDriver, Maven, and 
 
 - Java 25 LTS (the Maven compiler target is release 25)
 - Maven 3.9+
-- Google Chrome
+- Google Chrome, Mozilla Firefox, or Microsoft Edge
 
 Selenium Manager is used by Selenium 4 to resolve browser drivers automatically.
 
@@ -53,9 +53,24 @@ WMS_PASSWORD=your-wms-password
 Useful flow toggles:
 
 ```env
+BROWSER=chrome
+HEADLESS=false
 KEEP_BROWSER_OPEN=false
 INBOUND_CREATE_NEW=true
 CREATE_ORDER_CREATE_PICKUP=true
+```
+
+Browser values can be `chrome`, `firefox`, or `edge`. The browser is resolved in
+this order: JVM system property `browser`, JVM/env/.env key `BROWSER`, TestNG
+parameter `browser`, then `chrome`.
+
+Selenium Manager downloads browser drivers automatically. If the machine cannot
+reach the driver download host, set a local driver path:
+
+```env
+EDGE_DRIVER_PATH=C:\tools\msedgedriver.exe
+CHROME_DRIVER_PATH=C:\tools\chromedriver.exe
+FIREFOX_DRIVER_PATH=C:\tools\geckodriver.exe
 ```
 
 ## Commands
@@ -72,7 +87,14 @@ Run all TestNG tests:
 mvn test
 ```
 
-Run tests without opening Chrome windows:
+Run tests on a specific browser:
+
+```bash
+mvn -Dbrowser=edge test
+mvn -Dbrowser=firefox test
+```
+
+Run tests without opening browser windows:
 
 ```bash
 mvn -DHEADLESS=true test
