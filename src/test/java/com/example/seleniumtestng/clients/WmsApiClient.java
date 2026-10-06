@@ -21,6 +21,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -334,11 +335,17 @@ public class WmsApiClient {
     public List<PackingOrder> getPickupPackingOrders(String pickupId, String token) {
         JsonNode json = request("GET", "/v1/pickup/detail/" + pickupId, token, null, true);
         List<PackingOrder> orders = new ArrayList<>();
+        Map<String, List<String>> serialCodeCache = new HashMap<>();
+        Map<String, Integer> serialCodeCursor = new HashMap<>();
         for (JsonNode order : json.path("data").path("pickup_orders")) {
             String trackingCode = order.path("tracking_code").asText(null);
             List<PickupItem> items = new ArrayList<>();
             for (JsonNode item : order.path("list_items")) {
-                items.add(toPickupItem(trackingCode, item));
+                PickupItem pickupItem = toPickupItem(trackingCode, item);
+                if (pickupItem.isSerialCode()) {
+                    pickupItem = withAllocatedSerialCodes(pickupItem, token, serialCodeCache, serialCodeCursor);
+                }
+                items.add(pickupItem);
             }
             orders.add(new PackingOrder(trackingCode, items));
         }
@@ -783,8 +790,36 @@ public class WmsApiClient {
             if (value.canConvertToInt()) {
                 return value.asInt();
             }
+            if (value.isTextual()) {
+                try {
+                    return Integer.parseInt(value.asText().trim());
+                } catch (NumberFormatException ignored) {
+                }
+            }
         }
         return 0;
+    }
+
+    private boolean firstBoolean(JsonNode node, String... fields) {
+        for (String field : fields) {
+            JsonNode value = node.path(field);
+            if (value.isBoolean()) {
+                return value.asBoolean();
+            }
+            if (value.isNumber()) {
+                return value.asInt() != 0;
+            }
+            if (value.isTextual()) {
+                String text = value.asText("").trim();
+                if ("true".equalsIgnoreCase(text) || "1".equals(text)) {
+                    return true;
+                }
+                if ("false".equalsIgnoreCase(text) || "0".equals(text)) {
+                    return false;
+                }
+            }
+        }
+        return false;
     }
 
     private String authorizationHeader(String token, boolean bearer) {
@@ -809,8 +844,124 @@ public class WmsApiClient {
                 goods.path("partner_code").asText(null),
                 goods.path("goods_code").asText(null),
                 readStringList(goods.path("barcodes")),
+                firstBoolean(item, "is_serial_code", "isSerialCode")
+                        || firstBoolean(goods, "is_serial_code", "isSerialCode"),
+                Collections.emptyList(),
                 item.path("quantity_sold").asInt(),
                 item.path("quantity_pick").asInt());
+    }
+
+    private PickupItem withAllocatedSerialCodes(
+            PickupItem item,
+            String token,
+            Map<String, List<String>> serialCodeCache,
+            Map<String, Integer> serialCodeCursor) {
+        int quantityNeedScan = Math.max(0, item.quantitySold() - item.quantityPick());
+        if (quantityNeedScan == 0) {
+            return item;
+        }
+
+        String productCode = serialProductCode(item);
+        if (productCode == null || productCode.isBlank()) {
+            throw new IllegalStateException("Serial item has no product code: tracking="
+                    + item.trackingCode()
+                    + ", partnerCode="
+                    + item.partnerCode());
+        }
+
+        List<String> availableSerialCodes = serialCodeCache.computeIfAbsent(
+                productCode,
+                code -> getAvailableSerialCodes(code, token));
+        int cursor = serialCodeCursor.getOrDefault(productCode, 0);
+        if (cursor + quantityNeedScan > availableSerialCodes.size()) {
+            throw new IllegalStateException("Not enough available serials with status_id=201 for product "
+                    + productCode
+                    + ". need="
+                    + quantityNeedScan
+                    + ", allocated="
+                    + cursor
+                    + ", available="
+                    + availableSerialCodes.size());
+        }
+
+        List<String> allocatedSerialCodes = new ArrayList<>(
+                availableSerialCodes.subList(cursor, cursor + quantityNeedScan));
+        serialCodeCursor.put(productCode, cursor + quantityNeedScan);
+        System.out.println("Allocated serials for tracking="
+                + item.trackingCode()
+                + ", product="
+                + productCode
+                + ": "
+                + allocatedSerialCodes);
+        return new PickupItem(
+                item.trackingCode(),
+                item.partnerCode(),
+                item.goodsCode(),
+                item.barcodes(),
+                true,
+                allocatedSerialCodes,
+                item.quantitySold(),
+                item.quantityPick());
+    }
+
+    private List<String> getAvailableSerialCodes(String productCode, String token) {
+        JsonNode json = request("GET", "/v1/inventory/list-serial/" + encode(productCode), token, null, true);
+        List<String> serialCodes = new ArrayList<>();
+        collectAvailableSerialCodes(json.path("data"), serialCodes);
+        if (serialCodes.isEmpty()) {
+            collectAvailableSerialCodes(json, serialCodes);
+        }
+        if (serialCodes.isEmpty()) {
+            throw new IllegalStateException("No serial_code with status_id=201 found for product " + productCode);
+        }
+        System.out.println("Available serials status_id=201 for product=" + productCode + ": " + serialCodes.size());
+        return serialCodes;
+    }
+
+    private void collectAvailableSerialCodes(JsonNode node, List<String> serialCodes) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                collectAvailableSerialCodes(item, serialCodes);
+            }
+            return;
+        }
+        if (!node.isObject()) {
+            return;
+        }
+
+        int statusId = readSerialStatusId(node);
+        String serialCode = textOrNull(node, "serial_code", "serialCode");
+        if (statusId == 201 && serialCode != null && !serialCode.isBlank()) {
+            serialCodes.add(serialCode);
+        }
+
+        for (JsonNode child : node) {
+            collectAvailableSerialCodes(child, serialCodes);
+        }
+    }
+
+    private int readSerialStatusId(JsonNode serial) {
+        int statusId = firstInt(serial, "status_id", "statusId");
+        if (statusId > 0) {
+            return statusId;
+        }
+        JsonNode status = firstPresent(
+                serial.path("status"),
+                serial.path("serial_status"),
+                serial.path("serialStatus"),
+                serial.path("status_id"),
+                serial.path("statusId"));
+        return firstInt(status, "id", "status_id", "statusId", "value");
+    }
+
+    private String serialProductCode(PickupItem item) {
+        if (item.goodsCode() != null && !item.goodsCode().isBlank()) {
+            return item.goodsCode();
+        }
+        return item.partnerCode();
     }
 
     private List<JsonNode> getPickupBinsets(String pickupCode, String token) {

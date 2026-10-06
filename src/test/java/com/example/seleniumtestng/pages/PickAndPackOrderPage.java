@@ -126,14 +126,14 @@ public class PickAndPackOrderPage extends BasePage {
                 continue;
             }
 
-            String firstBarcode = getItemBarcode(firstPending);
+            String firstScanCode = getFirstItemScanCode(firstPending);
             System.out.println("Scan first product to let system suggest order: tracking="
-                    + order.trackingCode() + ", barcode=" + firstBarcode);
-            scanProductBarcode(firstBarcode);
+                    + order.trackingCode() + ", scanCode=" + firstScanCode);
+            scanProductBarcode(firstScanCode);
             String currentTracking = openCurrentOrSuggestedOrder(order.trackingCode());
             if (!visitedTrackingCodes.contains(currentTracking)) {
                 System.out.println("Packing suggested tracking: " + currentTracking);
-                packCurrentSuggestedOrder(materialCode, order, firstBarcode);
+                packCurrentSuggestedOrder(materialCode, order, firstScanCode);
                 visitedTrackingCodes.add(currentTracking);
                 packedOrderCount++;
             } else {
@@ -159,10 +159,10 @@ public class PickAndPackOrderPage extends BasePage {
                 continue;
             }
 
-            String firstBarcode = getItemBarcode(firstPending);
+            String firstScanCode = getFirstItemScanCode(firstPending);
             System.out.println("Scan first product to let system suggest order: tracking="
-                    + order.trackingCode() + ", barcode=" + firstBarcode);
-            scanProductBarcode(firstBarcode);
+                    + order.trackingCode() + ", scanCode=" + firstScanCode);
+            scanProductBarcode(firstScanCode);
             String currentTracking = openCurrentOrSuggestedOrder(order.trackingCode());
             if (visitedTrackingCodes.contains(currentTracking)) {
                 System.out.println("Skip already processed tracking: " + currentTracking);
@@ -170,7 +170,7 @@ public class PickAndPackOrderPage extends BasePage {
             }
 
             System.out.println("Packing suggested tracking: " + currentTracking);
-            packCurrentSuggestedOrder(materialCode, order, firstBarcode);
+            packCurrentSuggestedOrder(materialCode, order, firstScanCode);
             visitedTrackingCodes.add(currentTracking);
             return currentTracking;
         }
@@ -184,10 +184,10 @@ public class PickAndPackOrderPage extends BasePage {
             return null;
         }
 
-        String firstBarcode = getItemBarcode(firstPending);
+        String firstScanCode = getFirstItemScanCode(firstPending);
         System.out.println("Scan first product for mapped basket order: tracking="
-                + order.trackingCode() + ", barcode=" + firstBarcode);
-        scanProductBarcode(firstBarcode);
+                + order.trackingCode() + ", scanCode=" + firstScanCode);
+        scanProductBarcode(firstScanCode);
         String currentTracking = openCurrentOrSuggestedOrder(order.trackingCode());
         if (!order.trackingCode().equals(currentTracking)) {
             throw new IllegalStateException("Basket opened unexpected packing order. Expected tracking="
@@ -199,7 +199,7 @@ public class PickAndPackOrderPage extends BasePage {
         }
 
         System.out.println("Packing mapped basket tracking: " + currentTracking);
-        packCurrentSuggestedOrder(materialCode, order, firstBarcode);
+        packCurrentSuggestedOrder(materialCode, order, firstScanCode);
         return currentTracking;
     }
 
@@ -207,13 +207,12 @@ public class PickAndPackOrderPage extends BasePage {
         for (PackingOrder order : packingOrders) {
             boolean scanned = false;
             for (PickupItem item : order.items()) {
-                String barcode = getItemBarcode(item);
                 int quantityNeedScan = getQuantityNeedScan(item);
-                if (barcode == null || quantityNeedScan <= 0) {
+                if (quantityNeedScan <= 0 || getFirstItemScanCode(item) == null) {
                     continue;
                 }
                 for (int i = 0; i < quantityNeedScan; i++) {
-                    if (scanProductBarcode(barcode)) {
+                    if (scanProductBarcode(getItemScanCode(item, i))) {
                         scanned = true;
                     } else {
                         break;
@@ -229,7 +228,7 @@ public class PickAndPackOrderPage extends BasePage {
 
     private PickupItem firstPendingItem(PackingOrder order) {
         for (PickupItem item : order.items()) {
-            if (getItemBarcode(item) != null && getQuantityNeedScan(item) > 0) {
+            if (getQuantityNeedScan(item) > 0 && getFirstItemScanCode(item) != null) {
                 return item;
             }
         }
@@ -239,28 +238,120 @@ public class PickAndPackOrderPage extends BasePage {
     private void packCurrentSuggestedOrder(
             String materialCode,
             PackingOrder order,
-            String initiallyScannedBarcode) {
+            String initiallyScannedCode) {
         boolean initialScanAccounted = false;
         for (PickupItem item : order.items()) {
-            String barcode = getItemBarcode(item);
             int quantityToScan = getQuantityNeedScan(item);
-            if (barcode == null || quantityToScan <= 0) {
+            if (quantityToScan <= 0 || getFirstItemScanCode(item) == null) {
                 continue;
             }
-            if (!initialScanAccounted && barcode.equals(initiallyScannedBarcode)) {
+            int startIndex = 0;
+            if (!initialScanAccounted && hasScanCode(item, initiallyScannedCode)) {
+                startIndex = indexAfterScanCode(item, initiallyScannedCode);
                 quantityToScan = Math.max(0, quantityToScan - 1);
                 initialScanAccounted = true;
             }
-            for (int index = 0; index < quantityToScan; index++) {
-                if (isPackagingMaterialPromptVisibleNow() || !scanProductBarcode(barcode)) {
+            for (int index = startIndex; index < startIndex + quantityToScan; index++) {
+                String scanCode = getItemScanCode(item, index);
+                if (item.isSerialCode()) {
+                    System.out.println("Scan serial product: tracking="
+                            + item.trackingCode()
+                            + ", serial="
+                            + scanCode);
+                }
+                if (isPackagingMaterialPromptVisibleNow() && !hasPendingUiItemsNow()) {
+                    break;
+                }
+                if (!scanProductBarcode(scanCode)) {
+                    assertNoPendingUiItemsBeforeMaterial(order.trackingCode());
                     break;
                 }
             }
-            if (isPackagingMaterialPromptVisibleNow()) {
+            if (isPackagingMaterialPromptVisibleNow() && !hasPendingUiItemsNow()) {
                 break;
             }
         }
+        scanRemainingUiItemsFromScreen(order.trackingCode());
+        assertNoPendingUiItemsBeforeMaterial(order.trackingCode());
         scanPackagingMaterial(materialCode);
+    }
+
+    private void scanRemainingUiItemsFromScreen(String trackingCode) {
+        for (int attempt = 1; attempt <= 100; attempt++) {
+            PackingUiItem pendingItem = firstPendingUiItem();
+            if (pendingItem == null) {
+                return;
+            }
+
+            int pendingBefore = totalPendingUiItemCount();
+            System.out.println("Scan remaining UI product: tracking="
+                    + trackingCode
+                    + ", barcode="
+                    + pendingItem.barcode()
+                    + ", needScan="
+                    + pendingItem.needScan());
+            if (!scanProductBarcode(pendingItem.barcode())) {
+                assertNoPendingUiItemsBeforeMaterial(trackingCode);
+                return;
+            }
+            waitForPendingUiCountToDecrease(pendingBefore, pendingItem.barcode());
+        }
+        throw new IllegalStateException("Too many attempts while scanning remaining UI products. tracking="
+                + trackingCode
+                + ", pending="
+                + pendingUiItemsSummary(pendingUiItemsNow()));
+    }
+
+    private void assertNoPendingUiItemsBeforeMaterial(String trackingCode) {
+        List<PackingUiItem> pendingItems = pendingUiItemsNow();
+        if (!pendingItems.isEmpty()) {
+            throw new IllegalStateException("Packing order still has pending products before material scan. tracking="
+                    + trackingCode
+                    + ", pending="
+                    + pendingUiItemsSummary(pendingItems)
+                    + ", screen="
+                    + summarizeScreenText());
+        }
+    }
+
+    private List<PackingUiItem> pendingUiItemsNow() {
+        List<PackingUiItem> pendingItems = new ArrayList<>();
+        for (PackingUiItem item : getCurrentPackingItemsFromUi()) {
+            if (item.needScan() > 0) {
+                pendingItems.add(item);
+            }
+        }
+        return pendingItems;
+    }
+
+    private int totalPendingUiItemCount() {
+        int total = 0;
+        for (PackingUiItem item : getCurrentPackingItemsFromUi()) {
+            total += Math.max(0, item.needScan());
+        }
+        return total;
+    }
+
+    private void waitForPendingUiCountToDecrease(int previousPendingCount, String scanCode) {
+        try {
+            shortWait(3000).until(driver -> totalPendingUiItemCount() < previousPendingCount ? true : null);
+        } catch (RuntimeException error) {
+            throw new IllegalStateException("Pending UI quantity did not decrease after scanning " + scanCode
+                    + ". pendingBefore="
+                    + previousPendingCount
+                    + ", pendingAfter="
+                    + totalPendingUiItemCount()
+                    + ", screen="
+                    + summarizeScreenText(), error);
+        }
+    }
+
+    private String pendingUiItemsSummary(List<PackingUiItem> items) {
+        List<String> parts = new ArrayList<>();
+        for (PackingUiItem item : items) {
+            parts.add(item.barcode() + ":needScan=" + item.needScan());
+        }
+        return parts.toString();
     }
 
     private PackingUiItem firstPendingUiItem() {
@@ -801,6 +892,53 @@ public class PickAndPackOrderPage extends BasePage {
     private String summarizeScreenText() {
         String text = driver.findElement(By.tagName("body")).getText().replaceAll("\\s+", " ").trim();
         return text.length() <= 600 ? text : text.substring(0, 600);
+    }
+
+    private String getFirstItemScanCode(PickupItem item) {
+        return getItemScanCode(item, 0);
+    }
+
+    private String getItemScanCode(PickupItem item, int index) {
+        if (item.isSerialCode()) {
+            if (item.serialCodes() == null || item.serialCodes().isEmpty()) {
+                throw new IllegalStateException("Serial item has no allocated serial code. tracking="
+                        + item.trackingCode()
+                        + ", partnerCode="
+                        + item.partnerCode()
+                        + ", goodsCode="
+                        + item.goodsCode());
+            }
+            if (index >= item.serialCodes().size()) {
+                throw new IllegalStateException("Not enough allocated serial codes for tracking="
+                        + item.trackingCode()
+                        + ", partnerCode="
+                        + item.partnerCode()
+                        + ", requestedIndex="
+                        + index
+                        + ", available="
+                        + item.serialCodes().size());
+            }
+            return item.serialCodes().get(index);
+        }
+        return getItemBarcode(item);
+    }
+
+    private boolean hasScanCode(PickupItem item, String scanCode) {
+        if (scanCode == null) {
+            return false;
+        }
+        if (item.isSerialCode()) {
+            return item.serialCodes() != null && item.serialCodes().contains(scanCode);
+        }
+        return scanCode.equals(getItemBarcode(item));
+    }
+
+    private int indexAfterScanCode(PickupItem item, String scanCode) {
+        if (!item.isSerialCode() || item.serialCodes() == null) {
+            return 0;
+        }
+        int index = item.serialCodes().indexOf(scanCode);
+        return index < 0 ? 0 : index + 1;
     }
 
     private String getItemBarcode(PickupItem item) {
