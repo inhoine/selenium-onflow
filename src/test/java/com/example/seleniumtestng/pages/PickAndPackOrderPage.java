@@ -6,9 +6,11 @@ import com.example.seleniumtestng.models.PickupItem;
 import com.example.seleniumtestng.utils.ScanTable;
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -46,6 +48,8 @@ public class PickAndPackOrderPage extends BasePage {
     private final By visibleModal = By.cssSelector(".modal.show");
     private final By visibleModalCloseButton = By.xpath("//*[contains(@class,'modal') and contains(@class,'show')]//button[contains(@class,'btn-close') or @aria-label='Close' or normalize-space()='×' or normalize-space()='Đóng' or normalize-space()='Dong']");
     private final By confirmScanPickupButton = By.xpath("//button[normalize-space()='Xác nhận' or normalize-space()='Xac nhan']");
+    private final Map<String, String> lastScannedSerialByBarcode = new HashMap<>();
+    private final Set<String> confirmedScannedSerialCodes = new HashSet<>();
 
     public PickAndPackOrderPage(WebDriver driver) {
         super(driver);
@@ -250,56 +254,118 @@ public class PickAndPackOrderPage extends BasePage {
                 startIndex = indexAfterScanCode(item, initiallyScannedCode);
                 quantityToScan = Math.max(0, quantityToScan - 1);
                 initialScanAccounted = true;
+                markSerialScanConfirmedIfNeeded(item, initiallyScannedCode);
             }
             for (int index = startIndex; index < startIndex + quantityToScan; index++) {
                 String scanCode = getItemScanCode(item, index);
-                if (item.isSerialCode()) {
-                    System.out.println("Scan serial product: tracking="
-                            + item.trackingCode()
-                            + ", serial="
-                            + scanCode);
-                }
                 if (isPackagingMaterialPromptVisibleNow() && !hasPendingUiItemsNow()) {
                     break;
                 }
+                int pendingBefore = item.isSerialCode() ? totalPendingUiItemCount() : -1;
+                logSerialScanAttemptIfNeeded(item, scanCode);
                 if (!scanProductBarcode(scanCode)) {
                     assertNoPendingUiItemsBeforeMaterial(order.trackingCode());
                     break;
+                }
+                if (item.isSerialCode()) {
+                    waitForPendingUiCountToDecrease(pendingBefore, scanCode);
+                    markSerialScanConfirmedIfNeeded(item, scanCode);
                 }
             }
             if (isPackagingMaterialPromptVisibleNow() && !hasPendingUiItemsNow()) {
                 break;
             }
         }
-        scanRemainingUiItemsFromScreen(order.trackingCode());
+        scanRemainingUiItemsFromScreen(order);
         assertNoPendingUiItemsBeforeMaterial(order.trackingCode());
         scanPackagingMaterial(materialCode);
     }
 
-    private void scanRemainingUiItemsFromScreen(String trackingCode) {
+    private void scanRemainingUiItemsFromScreen(PackingOrder order) {
         for (int attempt = 1; attempt <= 100; attempt++) {
             PackingUiItem pendingItem = firstPendingUiItem();
             if (pendingItem == null) {
                 return;
             }
 
+            PickupItem serialItem = serialItemForBarcode(order, pendingItem.barcode());
+            String scanCode = remainingUiScanCode(order, pendingItem, serialItem);
             int pendingBefore = totalPendingUiItemCount();
             System.out.println("Scan remaining UI product: tracking="
-                    + trackingCode
+                    + order.trackingCode()
                     + ", barcode="
                     + pendingItem.barcode()
+                    + (serialItem == null ? "" : ", serial=" + scanCode)
                     + ", needScan="
                     + pendingItem.needScan());
-            if (!scanProductBarcode(pendingItem.barcode())) {
-                assertNoPendingUiItemsBeforeMaterial(trackingCode);
+            if (!scanProductBarcode(scanCode)) {
+                assertNoPendingUiItemsBeforeMaterial(order.trackingCode());
                 return;
             }
-            waitForPendingUiCountToDecrease(pendingBefore, pendingItem.barcode());
+            waitForPendingUiCountToDecrease(pendingBefore, scanCode);
+            if (serialItem != null) {
+                lastScannedSerialByBarcode.put(pendingItem.barcode(), scanCode);
+                confirmedScannedSerialCodes.add(scanCode);
+            }
         }
         throw new IllegalStateException("Too many attempts while scanning remaining UI products. tracking="
-                + trackingCode
+                + order.trackingCode()
                 + ", pending="
                 + pendingUiItemsSummary(pendingUiItemsNow()));
+    }
+
+    private String remainingUiScanCode(PackingOrder order, PackingUiItem pendingItem, PickupItem serialItem) {
+        if (serialItem == null) {
+            return pendingItem.barcode();
+        }
+
+        for (String serialCode : serialItem.serialCodes()) {
+            if (!confirmedScannedSerialCodes.contains(serialCode)) {
+                return serialCode;
+            }
+        }
+        throw new IllegalStateException("No remaining allocated serial available for pending serial product. tracking="
+                + order.trackingCode()
+                + ", barcode="
+                + pendingItem.barcode()
+                + ", pending="
+                + pendingItem.needScan()
+                + ", allocatedSerials="
+                + serialItem.serialCodes()
+                + ", confirmedSerials="
+                + confirmedScannedSerialCodes);
+    }
+
+    private PickupItem serialItemForBarcode(PackingOrder order, String barcode) {
+        for (PickupItem item : order.items()) {
+            if (item.isSerialCode() && barcode.equals(getItemBarcode(item))) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    private void logSerialScanAttemptIfNeeded(PickupItem item, String serialCode) {
+        if (!item.isSerialCode()) {
+            return;
+        }
+        System.out.println("Scan serial product: tracking="
+                + item.trackingCode()
+                + ", barcode="
+                + getItemBarcode(item)
+                + ", serial="
+                + serialCode);
+    }
+
+    private void markSerialScanConfirmedIfNeeded(PickupItem item, String serialCode) {
+        if (!item.isSerialCode()) {
+            return;
+        }
+        String itemBarcode = getItemBarcode(item);
+        if (itemBarcode != null && !itemBarcode.isBlank()) {
+            lastScannedSerialByBarcode.put(itemBarcode, serialCode);
+        }
+        confirmedScannedSerialCodes.add(serialCode);
     }
 
     private void assertNoPendingUiItemsBeforeMaterial(String trackingCode) {
@@ -326,7 +392,7 @@ public class PickAndPackOrderPage extends BasePage {
 
     private int totalPendingUiItemCount() {
         int total = 0;
-        for (PackingUiItem item : getCurrentPackingItemsFromUi()) {
+        for (PackingUiItem item : getCurrentPackingItemsFromUi(false)) {
             total += Math.max(0, item.needScan());
         }
         return total;
@@ -364,6 +430,10 @@ public class PickAndPackOrderPage extends BasePage {
     }
 
     private List<PackingUiItem> getCurrentPackingItemsFromUi() {
+        return getCurrentPackingItemsFromUi(true);
+    }
+
+    private List<PackingUiItem> getCurrentPackingItemsFromUi(boolean logRows) {
         List<WebElement> rows = wait.until(driver -> {
             List<WebElement> elements = all(productRows);
             return elements.isEmpty() ? null : elements;
@@ -384,12 +454,20 @@ public class PickAndPackOrderPage extends BasePage {
             int packed = Integer.parseInt(quantityMatcher.group(1));
             int total = Integer.parseInt(quantityMatcher.group(2));
             items.add(new PackingUiItem(barcode, total - packed));
-            System.out.println("Packing UI row: barcode=" + barcode
-                    + ", qty=" + qtyText
-                    + ", needScan=" + (total - packed)
-                    + ", row=" + rowText.replaceAll("\\s+", " "));
+            if (logRows) {
+                System.out.println("Packing UI row: barcode=" + barcode
+                        + ", qty=" + qtyText
+                        + ", needScan=" + (total - packed)
+                        + lastScannedSerialLog(barcode)
+                        + ", row=" + rowText.replaceAll("\\s+", " "));
+            }
         }
         return items;
+    }
+
+    private String lastScannedSerialLog(String barcode) {
+        String serial = lastScannedSerialByBarcode.get(barcode);
+        return serial == null || serial.isBlank() ? "" : ", lastScannedSerial=" + serial;
     }
 
     private boolean scanProductBarcode(String barcode) {
