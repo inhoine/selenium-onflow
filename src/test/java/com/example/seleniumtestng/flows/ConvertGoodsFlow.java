@@ -14,13 +14,8 @@ public class ConvertGoodsFlow {
     public void createConvertGoodsRequest(ConvertGoodsRequestData data) {
         ConvertGoodsPage convertGoodsPage = new ConvertGoodsPage(driver);
         convertGoodsPage.open();
-        if (convertGoodsPage.openExistingRequestDetailIfPresent(data.productCode())) {
-            convertGoodsPage.approveRequest(data.approvalReason());
-            convertGoodsPage.putawayApprovedGoods(data.putawayLocation());
-            return;
-        }
         convertGoodsPage.createRequest(data);
-        convertGoodsPage.openCreatedRequestDetail(data.productCode());
+        convertGoodsPage.openCreatedRequestDetail(data);
         convertGoodsPage.approveRequest(data.approvalReason());
         convertGoodsPage.putawayApprovedGoods(data.putawayLocation());
     }

@@ -73,6 +73,14 @@ public class ConvertGoodsPage extends BasePage {
         submitRequest();
     }
 
+    public void openCreatedRequestDetail(ConvertGoodsRequestData data) {
+        waitForListAfterSubmit();
+        searchListByProductCode(data.productCode());
+        WebElement row = requestRowByCreatedRequest(data);
+        openDetailFromRow(row);
+        waitForDetailPage(data.productCode());
+    }
+
     public void openCreatedRequestDetail(String productCode) {
         waitForListAfterSubmit();
         searchListByProductCode(productCode);
@@ -210,7 +218,7 @@ public class ConvertGoodsPage extends BasePage {
         if (currentUrl.matches(".*/convert-goods/[^/?#]+.*")) {
             return true;
         }
-        return !driver.findElements(By.xpath(
+        return false && !driver.findElements(By.xpath(
                 "//*[contains(normalize-space(.),'Chi tiáº¿t') or contains(normalize-space(.),'Chi tiet')]"))
                 .isEmpty();
     }
@@ -413,6 +421,25 @@ public class ConvertGoodsPage extends BasePage {
                 + summarize(driver.findElement(By.tagName("body")).getText()));
     }
 
+    private WebElement requestRowByCreatedRequest(ConvertGoodsRequestData data) {
+        WebElement row = findRequestRowByProductCodeAndReason(data.productCode(), data.reason(), 15000);
+        if (row != null) {
+            return row;
+        }
+
+        row = findRequestRowByProductCode(data.productCode(), 10000, true);
+        if (row != null) {
+            return row;
+        }
+
+        throw new IllegalStateException("Created convert goods request was not found by SKU and reason: "
+                + data.productCode()
+                + " / "
+                + data.reason()
+                + ". Screen="
+                + summarize(driver.findElement(By.tagName("body")).getText()));
+    }
+
     private WebElement findRequestRowByProductCode(String productCode, long timeoutMillis, boolean skipCompleted) {
         try {
             return shortWait(timeoutMillis).until(driver -> {
@@ -421,6 +448,28 @@ public class ConvertGoodsPage extends BasePage {
                         continue;
                     }
                     if (rowMatches(row, productCode) && (!skipCompleted || !rowIsCompleted(row))) {
+                        return row;
+                    }
+                }
+                return null;
+            });
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private WebElement findRequestRowByProductCodeAndReason(String productCode, String reason, long timeoutMillis) {
+        if (reason == null || reason.isBlank()) {
+            return null;
+        }
+
+        try {
+            return shortWait(timeoutMillis).until(driver -> {
+                for (WebElement row : driver.findElements(listRows)) {
+                    if (!displayed(row)) {
+                        continue;
+                    }
+                    if (rowMatches(row, productCode) && rowMatches(row, reason)) {
                         return row;
                     }
                 }
@@ -468,7 +517,7 @@ public class ConvertGoodsPage extends BasePage {
 
     private void openDetailFromRow(WebElement row) {
         String urlBefore = String.valueOf(driver.getCurrentUrl());
-        WebElement rowLink = firstVisibleEnabled(row.findElements(By.cssSelector("a[href]")));
+        WebElement rowLink = firstDetailLink(row);
         if (rowLink != null) {
             clickElement(rowLink);
             if (detailOpened(urlBefore, 5000)) {
@@ -502,7 +551,23 @@ public class ConvertGoodsPage extends BasePage {
         }
 
         clickElement(row);
-        detailOpened(urlBefore, 3000);
+        if (!detailOpened(urlBefore, 3000)) {
+            throw new IllegalStateException("Could not open convert goods detail from row: "
+                    + summarize(row.getText()));
+        }
+    }
+
+    private WebElement firstDetailLink(WebElement row) {
+        for (WebElement link : row.findElements(By.cssSelector("a[href]"))) {
+            if (!displayed(link) || !link.isEnabled()) {
+                continue;
+            }
+            String href = link.getAttribute("href");
+            if (href != null && href.matches(".*/convert-goods/[^/?#]+.*")) {
+                return link;
+            }
+        }
+        return null;
     }
 
     private void waitForDetailPage(String productCode) {

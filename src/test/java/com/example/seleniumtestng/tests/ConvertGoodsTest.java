@@ -39,6 +39,7 @@ public class ConvertGoodsTest extends BaseTest {
     }
 
     private ConvertGoodsRequestData defaultRequestData() {
+        String runId = String.valueOf(System.currentTimeMillis());
         return new ConvertGoodsRequestData(
                 ConfigReader.getOrDefault("CONVERT_GOODS_PRODUCT_CODE", "MHMSI"),
                 Integer.parseInt(ConfigReader.getOrDefault("CONVERT_GOODS_QUANTITY", "2")),
@@ -46,12 +47,9 @@ public class ConvertGoodsTest extends BaseTest {
                 ConfigReader.getOrDefault("CONVERT_GOODS_TARGET_TYPE", "D1"),
                 ConfigReader.getOrDefault("CONVERT_GOODS_CURRENT_LOCATION", "VI-TRI-CHUA-2"),
                 ConfigReader.getOrDefault("CONVERT_GOODS_PENDING_LOCATION", "C-001"),
-                ConfigReader.getOrDefault(
-                        "CONVERT_GOODS_REASON",
-                        "Automation convert goods request " + System.currentTimeMillis()),
-                ConfigReader.getOrDefault(
-                        "CONVERT_GOODS_APPROVAL_REASON",
-                        "Automation approve convert goods request " + System.currentTimeMillis()),
+                ConfigReader.getOrDefault("CONVERT_GOODS_REASON", "Automation convert goods request") + " " + runId,
+                ConfigReader.getOrDefault("CONVERT_GOODS_APPROVAL_REASON", "Automation approve convert goods request")
+                        + " " + runId,
                 ConfigReader.getOrDefault("CONVERT_GOODS_PUTAWAY_LOCATION", "TEST-D1-0300"));
     }
 }
