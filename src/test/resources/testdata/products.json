@@ -1,7 +1,7 @@
 {
   "inboundPackages": [
     {
-      "products": [{ "sku": "CHO-XUAT", "quantity": 1000 }]
+      "products": [{ "sku": "SE_01", "quantity": 20 }]
     }
   ],
   "orderProducts": [

@@ -47,7 +47,12 @@ public class InboundProductWmsPage extends BasePage {
     private final By productBarcodeRows = By.xpath("//*[(@role='dialog' or contains(@class,'modal-content') or contains(@class,'modal-dialog'))"
             + " and .//*[contains(translate(normalize-space(.),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'barcode')]]"
             + "//*[self::tr or self::td or self::div or self::span][normalize-space()]");
-    private final By batchLotField = By.cssSelector("input[name='batch_lot_code']");
+    private final By batchLotField = By.xpath("//input["
+            + "@name='batch_lot_code' "
+            + "or contains(translate(@name,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'batch') "
+            + "or contains(translate(@name,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'lot') "
+            + "or contains(translate(@placeholder,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'batch') "
+            + "or contains(translate(@placeholder,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'lot')]");
     private final By manufactureDateFields = By.cssSelector(
             "input[name*='manufact'], input[name*='mfg'], input[name*='production'], "
                     + "input[name*='produce'], input[name*='nsx']");
@@ -294,16 +299,16 @@ public class InboundProductWmsPage extends BasePage {
     }
 
     public void inputBatchLotIfPresent() {
-        List<WebElement> fields = all(batchLotField);
-        if (!fields.isEmpty()) {
-            setInputValue(fields.get(0), String.valueOf(System.currentTimeMillis()));
+        WebElement field = firstEditable(batchLotField);
+        if (field != null) {
+            setInputValue(field, "BATCH-" + System.currentTimeMillis());
         }
     }
 
     public void clearBatchLotIfPresent() {
-        List<WebElement> fields = all(batchLotField);
-        if (!fields.isEmpty()) {
-            setInputValue(fields.get(0), "");
+        WebElement field = firstEditable(batchLotField);
+        if (field != null) {
+            setInputValue(field, "");
         }
     }
 
@@ -507,10 +512,7 @@ public class InboundProductWmsPage extends BasePage {
     }
 
     public boolean isConfirmInspectDisabled() {
-        WebElement button = firstVisible(confirmInspectBtn);
-        if (button == null) {
-            button = firstVisible(submitInspectBtn);
-        }
+        WebElement button = confirmInspectButtonByLocatorOrText(false);
         return button != null && !button.isEnabled();
     }
 
@@ -567,17 +569,11 @@ public class InboundProductWmsPage extends BasePage {
     }
 
     private void clickConfirmInspectButton() {
-        WebElement button = firstVisibleEnabled(confirmInspectBtn);
-        if (button == null) {
-            button = firstVisibleEnabled(submitInspectBtn);
-        }
+        WebElement button = confirmInspectButtonByLocatorOrText(true);
         if (button == null) {
             System.out.println("Visible buttons before confirm inspect: " + visibleButtonSummary());
             button = shortWait(2500).until(driver -> {
-                WebElement candidate = firstVisibleEnabled(confirmInspectBtn);
-                if (candidate == null) {
-                    candidate = firstVisibleEnabled(submitInspectBtn);
-                }
+                WebElement candidate = confirmInspectButtonByLocatorOrText(true);
                 return candidate == null ? null : candidate;
             });
         }
@@ -600,11 +596,36 @@ public class InboundProductWmsPage extends BasePage {
     }
 
     private WebElement confirmInspectButtonIfPresent() {
-        WebElement button = firstVisibleEnabled(confirmInspectBtn);
+        return confirmInspectButtonByLocatorOrText(true);
+    }
+
+    private WebElement confirmInspectButtonByLocatorOrText(boolean mustBeEnabled) {
+        WebElement button = mustBeEnabled ? firstVisibleEnabled(confirmInspectBtn) : firstVisible(confirmInspectBtn);
         if (button == null) {
-            button = firstVisibleEnabled(submitInspectBtn);
+            button = mustBeEnabled ? firstVisibleEnabled(submitInspectBtn) : firstVisible(submitInspectBtn);
         }
-        return button;
+        if (button != null) {
+            return button;
+        }
+        for (WebElement candidate : all(By.cssSelector("button"))) {
+            if (!isDisplayed(candidate) || (mustBeEnabled && !candidate.isEnabled())) {
+                continue;
+            }
+            String normalizedText = normalizeForMatch(safeText(candidate)).replaceAll("\\s+", " ").trim();
+            if (isInspectSubmitText(normalizedText)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private boolean isInspectSubmitText(String normalizedText) {
+        return normalizedText.contains("xac nhan kiem hang")
+                || normalizedText.equals("kiem hang")
+                || normalizedText.equals("xac nhan")
+                || normalizedText.equals("cap nhat")
+                || normalizedText.equals("hoan tat")
+                || normalizedText.equals("luu");
     }
 
     private boolean waitForScanBoxOrSkipAttachment(long millis) {

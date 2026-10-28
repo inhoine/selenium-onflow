@@ -22,7 +22,9 @@ import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 
 public class PickAndPackOrderPage extends BasePage {
-    private static final long MATERIAL_DELAY_MS = 500;
+    private static final long CUSTOMER_MATERIAL_TOAST_TIMEOUT_MS = 300;
+    private static final long ATTACHED_DOCUMENT_CONFIRM_TIMEOUT_MS = 600;
+    private static final long ATTACHED_DOCUMENT_CLOSE_TIMEOUT_MS = 2000;
     private static final String CUSTOMER_PACKING_MATERIAL_FALLBACK_CODE = "10x10x10";
     private static final Pattern QUANTITY_PATTERN = Pattern.compile("(\\d+)\\s*/\\s*(\\d+)");
 
@@ -119,25 +121,34 @@ public class PickAndPackOrderPage extends BasePage {
         Set<String> visitedTrackingCodes = new HashSet<>();
         int packedOrderCount = 0;
         for (PackingOrder order : packingOrders) {
+            if (isPackingCompleteNow()) {
+                break;
+            }
             if (visitedTrackingCodes.contains(order.trackingCode())) {
                 continue;
             }
 
-            PickupItem firstPending = firstPendingItem(order);
-            if (firstPending == null) {
-                System.out.println("Skip " + order.trackingCode() + ": no pending item by API quantities");
+            PickupItem firstScannable = firstScannableItem(order);
+            if (firstScannable == null) {
+                System.out.println("Skip " + order.trackingCode() + ": no scannable packing item by API data");
                 visitedTrackingCodes.add(order.trackingCode());
                 continue;
             }
 
-            String firstScanCode = getFirstItemScanCode(firstPending);
+            String firstScanCode = getFirstItemScanCode(firstScannable);
             System.out.println("Scan first product to let system suggest order: tracking="
                     + order.trackingCode() + ", scanCode=" + firstScanCode);
-            scanProductBarcode(firstScanCode);
+            if (!scanProductBarcode(firstScanCode)) {
+                if (isPackingCompleteNow()) {
+                    break;
+                }
+                continue;
+            }
             String currentTracking = openCurrentOrSuggestedOrder(order.trackingCode());
             if (!visitedTrackingCodes.contains(currentTracking)) {
                 System.out.println("Packing suggested tracking: " + currentTracking);
-                packCurrentSuggestedOrder(materialCode, order, firstScanCode);
+                PackingOrder suggestedOrder = requirePackingOrderByTrackingCode(packingOrders, currentTracking);
+                packCurrentSuggestedOrder(materialCode, suggestedOrder, firstScanCode);
                 visitedTrackingCodes.add(currentTracking);
                 packedOrderCount++;
             } else {
@@ -145,6 +156,26 @@ public class PickAndPackOrderPage extends BasePage {
             }
         }
         return packedOrderCount;
+    }
+
+    public void assertAllOrdersPacked(String pickupId) {
+        PackingProgress progress = getPackingProgress(5000);
+        if (progress == null) {
+            throw new IllegalStateException("Unable to read packing progress for pickup " + pickupId
+                    + ". Screen="
+                    + summarizeScreenText());
+        }
+
+        System.out.println("Packing progress: " + progress.packed() + "/" + progress.total());
+        if (progress.packed() != progress.total()) {
+            throw new IllegalStateException("Pickup " + pickupId
+                    + " is not fully packed. packed="
+                    + progress.packed()
+                    + "/"
+                    + progress.total()
+                    + ". Screen="
+                    + summarizeScreenText());
+        }
     }
 
     public String packNextBySystemSuggestion(
@@ -156,17 +187,22 @@ public class PickAndPackOrderPage extends BasePage {
                 continue;
             }
 
-            PickupItem firstPending = firstPendingItem(order);
-            if (firstPending == null) {
-                System.out.println("Skip " + order.trackingCode() + ": no pending item by API quantities");
+            PickupItem firstScannable = firstScannableItem(order);
+            if (firstScannable == null) {
+                System.out.println("Skip " + order.trackingCode() + ": no scannable packing item by API data");
                 visitedTrackingCodes.add(order.trackingCode());
                 continue;
             }
 
-            String firstScanCode = getFirstItemScanCode(firstPending);
+            String firstScanCode = getFirstItemScanCode(firstScannable);
             System.out.println("Scan first product to let system suggest order: tracking="
                     + order.trackingCode() + ", scanCode=" + firstScanCode);
-            scanProductBarcode(firstScanCode);
+            if (!scanProductBarcode(firstScanCode)) {
+                if (isPackingCompleteNow()) {
+                    return null;
+                }
+                continue;
+            }
             String currentTracking = openCurrentOrSuggestedOrder(order.trackingCode());
             if (visitedTrackingCodes.contains(currentTracking)) {
                 System.out.println("Skip already processed tracking: " + currentTracking);
@@ -174,7 +210,8 @@ public class PickAndPackOrderPage extends BasePage {
             }
 
             System.out.println("Packing suggested tracking: " + currentTracking);
-            packCurrentSuggestedOrder(materialCode, order, firstScanCode);
+            PackingOrder suggestedOrder = requirePackingOrderByTrackingCode(packingOrders, currentTracking);
+            packCurrentSuggestedOrder(materialCode, suggestedOrder, firstScanCode);
             visitedTrackingCodes.add(currentTracking);
             return currentTracking;
         }
@@ -182,13 +219,13 @@ public class PickAndPackOrderPage extends BasePage {
     }
 
     public String packOneOrderBySystemSuggestion(PackingOrder order, String materialCode) {
-        PickupItem firstPending = firstPendingItem(order);
-        if (firstPending == null) {
-            System.out.println("Skip " + order.trackingCode() + ": no pending item by API quantities");
+        PickupItem firstScannable = firstScannableItem(order);
+        if (firstScannable == null) {
+            System.out.println("Skip " + order.trackingCode() + ": no scannable packing item by API data");
             return null;
         }
 
-        String firstScanCode = getFirstItemScanCode(firstPending);
+        String firstScanCode = getFirstItemScanCode(firstScannable);
         System.out.println("Scan first product for mapped basket order: tracking="
                 + order.trackingCode() + ", scanCode=" + firstScanCode);
         scanProductBarcode(firstScanCode);
@@ -225,18 +262,25 @@ public class PickAndPackOrderPage extends BasePage {
             }
             if (scanned) {
                 scanPackagingMaterial(materialCode);
-                // sleep(MATERIAL_DELAY_MS);
             }
         }
     }
 
-    private PickupItem firstPendingItem(PackingOrder order) {
+    private PickupItem firstScannableItem(PackingOrder order) {
         for (PickupItem item : order.items()) {
-            if (getQuantityNeedScan(item) > 0 && getFirstItemScanCode(item) != null) {
+            if (item.quantitySold() > 0 && hasAvailableScanCode(item)) {
                 return item;
             }
         }
         return null;
+    }
+
+    private boolean hasAvailableScanCode(PickupItem item) {
+        if (item.isSerialCode()) {
+            return item.serialCodes() != null && !item.serialCodes().isEmpty();
+        }
+        String barcode = getItemBarcode(item);
+        return barcode != null && !barcode.isBlank();
     }
 
     private void packCurrentSuggestedOrder(
@@ -278,7 +322,9 @@ public class PickAndPackOrderPage extends BasePage {
         }
         scanRemainingUiItemsFromScreen(order);
         assertNoPendingUiItemsBeforeMaterial(order.trackingCode());
+        PackingProgress progressBeforeMaterial = readPackingProgressNow();
         scanPackagingMaterial(materialCode);
+        waitForPackingProgressToAdvance(order.trackingCode(), progressBeforeMaterial);
     }
 
     private void scanRemainingUiItemsFromScreen(PackingOrder order) {
@@ -420,6 +466,18 @@ public class PickAndPackOrderPage extends BasePage {
         return parts.toString();
     }
 
+    private PackingOrder requirePackingOrderByTrackingCode(List<PackingOrder> packingOrders, String trackingCode) {
+        for (PackingOrder order : packingOrders) {
+            if (trackingCode.equals(order.trackingCode())) {
+                return order;
+            }
+        }
+        throw new IllegalStateException("Suggested packing order is not present in pickup API response. tracking="
+                + trackingCode
+                + ", screen="
+                + summarizeScreenText());
+    }
+
     private PackingUiItem firstPendingUiItem() {
         for (PackingUiItem item : getCurrentPackingItemsFromUi()) {
             if (item.needScan() > 0) {
@@ -470,24 +528,90 @@ public class PickAndPackOrderPage extends BasePage {
         return serial == null || serial.isBlank() ? "" : ", lastScannedSerial=" + serial;
     }
 
-    private boolean scanProductBarcode(String barcode) {
-        WebElement input = wait.until(driver -> {
-            for (WebElement element : all(scanSkuField)) {
-                try {
-                    if (element.isDisplayed() && element.isEnabled()) {
-                        return element;
-                    }
-                } catch (RuntimeException ignored) {
-                }
-            }
+    private PackingProgress getPackingProgress(long timeoutMillis) {
+        try {
+            return shortWait(timeoutMillis).until(driver -> readPackingProgressNow());
+        } catch (RuntimeException ignored) {
             return null;
-        });
+        }
+    }
+
+    private boolean isPackingCompleteNow() {
+        PackingProgress progress = readPackingProgressNow();
+        return progress != null && progress.packed() == progress.total();
+    }
+
+    private void waitForPackingProgressToAdvance(String trackingCode, PackingProgress progressBeforeMaterial) {
+        if (progressBeforeMaterial == null) {
+            return;
+        }
+        try {
+            shortWait(8000).until(driver -> {
+                PackingProgress progress = readPackingProgressNow();
+                if (progress == null) {
+                    return null;
+                }
+                return progress.packed() > progressBeforeMaterial.packed()
+                        || progress.packed() == progress.total()
+                        ? true
+                        : null;
+            });
+        } catch (RuntimeException error) {
+            PackingProgress progress = readPackingProgressNow();
+            String currentProgress = progress == null
+                    ? "unknown"
+                    : progress.packed() + "/" + progress.total();
+            throw new IllegalStateException("Packing progress did not advance after material scan. tracking="
+                    + trackingCode
+                    + ", before="
+                    + progressBeforeMaterial.packed()
+                    + "/"
+                    + progressBeforeMaterial.total()
+                    + ", current="
+                    + currentProgress
+                    + ", screen="
+                    + summarizeScreenText(), error);
+        }
+    }
+
+    private PackingProgress readPackingProgressNow() {
+        String normalizedText = normalizeScanText(driver.findElement(By.tagName("body")).getText());
+        Matcher matcher = Pattern.compile("da dong goi\\s+(\\d+)\\s*/\\s*(\\d+)\\s+don")
+                .matcher(normalizedText);
+        if (!matcher.find()) {
+            return null;
+        }
+        return new PackingProgress(
+                Integer.parseInt(matcher.group(1)),
+                Integer.parseInt(matcher.group(2)));
+    }
+
+    private boolean scanProductBarcode(String barcode) {
+        WebElement input = findVisibleEnabled(scanSkuField, 1000);
+        if (input == null) {
+            if (isPackingCompleteNow() || isPackagingMaterialPromptVisibleNow() || !hasPendingUiItemsNow()) {
+                System.out.println("Product scan is complete; switch to material scan or stop.");
+                return false;
+            }
+            try {
+                input = wait.until(driver -> findVisibleEnabledNow(scanSkuField));
+            } catch (RuntimeException error) {
+                if (isPackingCompleteNow() || isPackagingMaterialPromptVisibleNow() || !hasPendingUiItemsNow()) {
+                    System.out.println("Product scan is complete; switch to material scan or stop.");
+                    return false;
+                }
+                throw new IllegalStateException("Product scan input is not available. barcode="
+                        + barcode
+                        + ", screen="
+                        + summarizeScreenText(), error);
+            }
+        }
         try {
             scanIntoProductInput(input, barcode);
             return true;
         } catch (RuntimeException error) {
             if (isPackagingMaterialPromptVisibleNow() || !hasPendingUiItemsNow()) {
-                System.out.println("Product scan is complete; switch to material scan.");
+                System.out.println("Product scan is complete; switch to material scan or stop.");
                 return false;
             }
             throw error;
@@ -505,20 +629,18 @@ public class PickAndPackOrderPage extends BasePage {
 
     private void scanPackagingMaterial(String materialCode) {
         scanOrClickPackagingMaterial(materialCode);
-        sleep(MATERIAL_DELAY_MS);
         if (isCustomerPackingMaterialToastPresent()
                 && !CUSTOMER_PACKING_MATERIAL_FALLBACK_CODE.equalsIgnoreCase(materialCode)) {
             System.out.println("Packing material " + materialCode
                     + " is rejected because the order requires customer packing material. Retry with "
                     + CUSTOMER_PACKING_MATERIAL_FALLBACK_CODE);
             scanOrClickPackagingMaterial(CUSTOMER_PACKING_MATERIAL_FALLBACK_CODE);
-            sleep(MATERIAL_DELAY_MS);
         }
         confirmAttachedDocumentsPrintedIfPresent();
     }
 
     private void scanOrClickPackagingMaterial(String materialCode) {
-        WebElement input = findVisiblePackagingMaterialInput(5000);
+        WebElement input = findVisiblePackagingMaterialInput(2500);
         if (input == null) {
             clickFallbackPackagingMaterial(materialCode);
             return;
@@ -554,7 +676,7 @@ public class PickAndPackOrderPage extends BasePage {
 
     private boolean isCustomerPackingMaterialToastPresent() {
         try {
-            return shortWait(2000).until(driver -> {
+            return shortWait(CUSTOMER_MATERIAL_TOAST_TIMEOUT_MS).until(driver -> {
                 for (WebElement toast : driver.findElements(By.xpath("//div[contains(@class,'Toastify__toast-body')]"))) {
                     try {
                         if (!toast.isDisplayed()) {
@@ -578,7 +700,7 @@ public class PickAndPackOrderPage extends BasePage {
     }
 
     private void confirmAttachedDocumentsPrintedIfPresent() {
-        WebElement confirmButton = findAttachedDocumentsPrintedConfirmButton(3000);
+        WebElement confirmButton = findAttachedDocumentsPrintedConfirmButton(ATTACHED_DOCUMENT_CONFIRM_TIMEOUT_MS);
         if (confirmButton == null) {
             return;
         }
@@ -586,7 +708,8 @@ public class PickAndPackOrderPage extends BasePage {
         jsClick(confirmButton);
         System.out.println("Confirmed all attached documents were printed");
         try {
-            shortWait(5000).until(driver -> !isAttachedDocumentsModalVisibleNow() ? true : null);
+            shortWait(ATTACHED_DOCUMENT_CLOSE_TIMEOUT_MS)
+                    .until(driver -> !isAttachedDocumentsModalVisibleNow() ? true : null);
         } catch (RuntimeException ignored) {
             System.out.println("Attached documents modal is still visible after confirming printed documents");
         }
@@ -1030,12 +1153,21 @@ public class PickAndPackOrderPage extends BasePage {
         return item.quantitySold() - item.quantityPick();
     }
 
-    private void sleep(long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while waiting", e);
+    private static final class PackingProgress {
+        private final int packed;
+        private final int total;
+
+        private PackingProgress(int packed, int total) {
+            this.packed = packed;
+            this.total = total;
+        }
+
+        private int packed() {
+            return packed;
+        }
+
+        private int total() {
+            return total;
         }
     }
 

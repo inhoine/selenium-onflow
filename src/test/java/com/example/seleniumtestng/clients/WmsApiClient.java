@@ -1,6 +1,9 @@
 package com.example.seleniumtestng.clients;
 
 import com.example.seleniumtestng.config.ConfigReader;
+import com.example.seleniumtestng.models.CampaignAwbList;
+import com.example.seleniumtestng.models.CampaignAwbTracking;
+import com.example.seleniumtestng.models.OrderAwbInfo;
 import com.example.seleniumtestng.models.POSku;
 import com.example.seleniumtestng.models.PackingOrder;
 import com.example.seleniumtestng.models.PickOrderBasket;
@@ -352,6 +355,132 @@ public class WmsApiClient {
             orders.add(new PackingOrder(trackingCode, items));
         }
         return orders;
+    }
+
+    public CampaignAwbList getCampaignAwbList(String pickupCode, String token) {
+        JsonNode json = request("GET", "/v1/campaign/awb/list/" + encode(pickupCode), token, null, true);
+        JsonNode data = json.path("data");
+        List<String> awbUrls = readStringList(data.path("list_awb"));
+        List<CampaignAwbTracking> trackings = new ArrayList<>();
+        for (JsonNode tracking : data.path("list_trackings")) {
+            String trackingCode = textOrNull(tracking, "tracking_code", "trackingCode");
+            if (trackingCode == null || trackingCode.isBlank()) {
+                continue;
+            }
+            trackings.add(new CampaignAwbTracking(
+                    trackingCode,
+                    firstBoolean(tracking, "is_packing_done", "isPackingDone"),
+                    firstBoolean(tracking, "is_awb_print", "isAwbPrint")));
+        }
+        System.out.println("Campaign AWB API: pickup="
+                + pickupCode
+                + ", pdfs="
+                + awbUrls.size()
+                + ", trackings="
+                + trackings.size());
+        return new CampaignAwbList(awbUrls, trackings);
+    }
+
+    public OrderAwbInfo getOrderAwbInfo(String trackingCode, String token) {
+        JsonNode json = request("GET", "/v1/order/detail/" + encode(trackingCode), token, null, true);
+        JsonNode order = firstPresent(json.path("data").path("order_id"), json.path("data"), json);
+        return new OrderAwbInfo(
+                firstNonBlank(textOrNull(order, "tracking_code", "trackingCode"), trackingCode),
+                textOrNull(order, "external_tracking_code", "externalTrackingCode"),
+                textOrNull(order, "carrier_tracking_code", "carrierTrackingCode", "awb_code", "awbCode"));
+    }
+
+    public String handoverPackedOrders(
+            List<PackingOrder> packingOrders,
+            String courierCode,
+            String driverName,
+            String driverPhone,
+            String driverLicenseNumber,
+            String token) {
+        List<String> trackingCodes = uniqueTrackingCodes(packingOrders);
+        if (trackingCodes.isEmpty()) {
+            throw new IllegalStateException("No tracking code found for handover");
+        }
+
+        String firstTrackingCode = trackingCodes.get(0);
+        String handoverCode = createHandoverSession(firstTrackingCode, courierCode, token);
+        String lastTrackingCode = firstTrackingCode;
+        for (int index = 1; index < trackingCodes.size(); index++) {
+            String trackingCode = trackingCodes.get(index);
+            addHandoverOrder(trackingCode, courierCode, handoverCode, token);
+            lastTrackingCode = trackingCode;
+            System.out.println("Added order to handover: tracking="
+                    + trackingCode
+                    + ", handoverCode="
+                    + handoverCode);
+        }
+
+        approveHandover(
+                handoverCode,
+                lastTrackingCode,
+                driverName,
+                driverPhone,
+                driverLicenseNumber,
+                token);
+        System.out.println("Approved handover " + handoverCode + " with " + trackingCodes.size() + " orders");
+        return handoverCode;
+    }
+
+    private String createHandoverSession(String trackingCode, String courierCode, String token) {
+        String handoverCode = addHandoverOrder(trackingCode, courierCode, null, token);
+        System.out.println("Created handover session: handoverCode="
+                + handoverCode
+                + ", firstTracking="
+                + trackingCode);
+        return handoverCode;
+    }
+
+    private String addHandoverOrder(
+            String trackingCode,
+            String courierCode,
+            String handoverCode,
+            String token) {
+        ObjectNode body = mapper.createObjectNode();
+        body.put("tracking_code", trackingCode);
+        body.put("courier_code", courierCode);
+        if (handoverCode == null || handoverCode.isBlank()) {
+            body.putNull("handover_code");
+        } else {
+            body.put("handover_code", handoverCode);
+        }
+
+        JsonNode json = request("POST", "/v1/handover/add", token, body.toString(), true);
+        String responseHandoverCode = extractHandoverCode(json);
+        if (responseHandoverCode != null && !responseHandoverCode.isBlank()) {
+            return responseHandoverCode;
+        }
+        if (handoverCode != null && !handoverCode.isBlank()) {
+            return handoverCode;
+        }
+        throw new IllegalStateException("Handover add response did not include handover_code. tracking="
+                + trackingCode
+                + ", response="
+                + json);
+    }
+
+    private void approveHandover(
+            String handoverCode,
+            String trackingCode,
+            String driverName,
+            String driverPhone,
+            String driverLicenseNumber,
+            String token) {
+        if (handoverCode == null || handoverCode.isBlank()) {
+            throw new IllegalStateException("Cannot approve handover without handover_code");
+        }
+
+        ObjectNode body = mapper.createObjectNode();
+        body.put("tracking_code", trackingCode);
+        body.put("is_update_drive", false);
+        body.put("delivery_drive_name", driverName);
+        body.put("delivery_drive_phone", driverPhone);
+        body.put("delivery_drive_license_number", driverLicenseNumber);
+        request("PUT", "/v1/handover/approved/" + encode(handoverCode), token, body.toString(), true);
     }
 
     public void mapTrolleyPicking(String pickupCode, String trolleyCode, String token) {
@@ -1233,6 +1362,52 @@ public class WmsApiClient {
             JsonNode value = goods.path(field);
             if (!value.isMissingNode() && !value.isNull() && !value.asText().isBlank()) {
                 return value.asText();
+            }
+        }
+        return null;
+    }
+
+    private List<String> uniqueTrackingCodes(List<PackingOrder> packingOrders) {
+        Set<String> trackingCodes = new LinkedHashSet<>();
+        for (PackingOrder order : packingOrders) {
+            if (order.trackingCode() != null && !order.trackingCode().isBlank()) {
+                trackingCodes.add(order.trackingCode());
+            }
+        }
+        return new ArrayList<>(trackingCodes);
+    }
+
+    private String extractHandoverCode(JsonNode json) {
+        String handoverCode = firstTextRecursive(json, "handover_code", "handoverCode");
+        if (handoverCode != null && !handoverCode.isBlank()) {
+            return handoverCode;
+        }
+        handoverCode = firstTextRecursive(json, "code");
+        if (handoverCode != null && handoverCode.toUpperCase().startsWith("HD-")) {
+            return handoverCode;
+        }
+        if (json != null && json.isTextual() && json.asText("").toUpperCase().startsWith("HD-")) {
+            return json.asText();
+        }
+        return null;
+    }
+
+    private String firstTextRecursive(JsonNode node, String... fields) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.isObject()) {
+            for (String field : fields) {
+                JsonNode value = node.path(field);
+                if (!value.isMissingNode() && !value.isNull() && !value.asText().isBlank()) {
+                    return value.asText();
+                }
+            }
+        }
+        for (JsonNode child : node) {
+            String value = firstTextRecursive(child, fields);
+            if (value != null && !value.isBlank()) {
+                return value;
             }
         }
         return null;

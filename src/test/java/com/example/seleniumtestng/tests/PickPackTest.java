@@ -126,8 +126,33 @@ public class PickPackTest extends BaseTest {
             String packingScanCode = basketCount > 0 ? basketCodes.get(0) : pickupId;
             pickAndPackOrderPage.scanPickUpOrder(packingScanCode);
             processedOrderCount = pickAndPackOrderPage.packBySystemSuggestion(packingOrders, packingMaterialCode);
+            pickAndPackOrderPage.assertAllOrdersPacked(pickupId);
         }
-        Assert.assertTrue(processedOrderCount > 0, "No order was processed for pickup " + pickupId);
+        handoverPackedOrdersIfEnabled(wmsApiClient, packingOrders, token);
+        if (isMsoPickup(pickupDetail)) {
+            Assert.assertTrue(processedOrderCount > 0, "No order was processed for pickup " + pickupId);
+        }
+    }
+
+    private void handoverPackedOrdersIfEnabled(
+            WmsApiClient wmsApiClient,
+            List<PackingOrder> packingOrders,
+            String token) {
+        boolean handoverEnabled = Boolean.parseBoolean(
+                ConfigReader.getOrDefault("DEFAULT_HANDOVER_ENABLED", "true"));
+        if (!handoverEnabled) {
+            System.out.println("Skip handover: DEFAULT_HANDOVER_ENABLED=false");
+            return;
+        }
+
+        String handoverCode = wmsApiClient.handoverPackedOrders(
+                packingOrders,
+                ConfigReader.getOrDefault("DEFAULT_HANDOVER_COURIER_CODE", "DFX"),
+                ConfigReader.getOrDefault("DEFAULT_HANDOVER_DRIVER_NAME", "ttt"),
+                ConfigReader.getOrDefault("DEFAULT_HANDOVER_DRIVER_PHONE", "555"),
+                ConfigReader.getOrDefault("DEFAULT_HANDOVER_DRIVER_LICENSE_NUMBER", "ggg"),
+                token);
+        Assert.assertFalse(handoverCode.isBlank(), "Handover code should not be blank");
     }
 
     private int packMsoBaskets(

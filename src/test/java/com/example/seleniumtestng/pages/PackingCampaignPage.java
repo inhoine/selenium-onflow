@@ -3,7 +3,13 @@ package com.example.seleniumtestng.pages;
 import com.example.seleniumtestng.config.ConfigReader;
 import java.text.Normalizer;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.openqa.selenium.By;
 import org.openqa.selenium.ElementClickInterceptedException;
 import org.openqa.selenium.JavascriptExecutor;
@@ -20,6 +26,8 @@ public class PackingCampaignPage extends BasePage {
             "input:not([type='hidden']), textarea, [contenteditable='true']");
     private final By clickableControls = By.cssSelector("button, [role='button'], a.btn");
     private final By productRows = By.cssSelector("tbody tr, [role='row']");
+    private final By tableHeaders = By.cssSelector("thead th, [role='columnheader']");
+    private final By tableCells = By.cssSelector("td, [role='cell']");
     private final By toastMessage = By.cssSelector(
             ".Toastify__toast-body, .ant-message-notice-content, .ant-notification-notice-message, "
                     + ".ant-notification-notice-description");
@@ -59,11 +67,80 @@ public class PackingCampaignPage extends BasePage {
         return findInputByPlaceholderNow("vat lieu dong goi", "nvl") != null;
     }
 
+    public boolean isOrderConfirmationListOpen() {
+        return isOrderConfirmationListOpenNow();
+    }
+
     public void scanPackingMaterial(String materialCode) {
         WebElement input = wait.until(driver -> findInputByPlaceholderNow("vat lieu dong goi", "nvl"));
         scanIntoInput(input, materialCode);
         System.out.println("Scanned packing campaign material code: " + materialCode);
         waitForMaterialScanFeedback(materialCode);
+    }
+
+    public void scanPackingMaterialIfPresent(String materialCode) {
+        WebElement input = findInputByPlaceholder(5000, "vat lieu dong goi", "nvl");
+        if (input == null) {
+            if (isOrderConfirmationListOpenNow()) {
+                System.out.println("Skip packing material scan: order confirmation list is already open");
+                return;
+            }
+            throw new IllegalStateException("Packing campaign material scanner was not found, and order list is not open."
+                    + " Screen="
+                    + summarizeScreenText());
+        }
+
+        scanIntoInput(input, materialCode);
+        System.out.println("Scanned packing campaign material code: " + materialCode);
+        waitForMaterialScanFeedback(materialCode);
+    }
+
+    public List<String> waitForAllAwbBillsPrintedAndScanOrders() {
+        long timeoutMillis = Long.parseLong(ConfigReader.getOrDefault(
+                "PACKING_CAMPAIGN_AWB_PRINT_TIMEOUT_MS",
+                "600000"));
+        long deadline = System.nanoTime() + Duration.ofMillis(timeoutMillis).toNanos();
+        Set<String> scannedOrderCodes = new LinkedHashSet<>();
+        scrollOrderListToTop();
+
+        while (System.nanoTime() < deadline) {
+            String orderCode = firstVisiblePrintedAwbOrderCodeNow(scannedOrderCodes);
+            if (orderCode != null) {
+                scanOrderConfirmationCode(orderCode);
+                scannedOrderCodes.add(orderCode);
+                continue;
+            }
+
+            if (hasVisibleUnscannedPrintingAwbRows(scannedOrderCodes)) {
+                sleepAfterOrderScan(500);
+                continue;
+            }
+
+            if (scrollOrderListDown()) {
+                sleepAfterOrderScan(300);
+                continue;
+            }
+
+            if (!scannedOrderCodes.isEmpty()) {
+                List<String> scanned = new ArrayList<>(scannedOrderCodes);
+                System.out.println("Scanned all visible packing campaign orders with printed AWB bills. count="
+                        + scanned.size()
+                        + ", orders="
+                        + String.join(",", scanned));
+                return scanned;
+            }
+
+            sleepAfterOrderScan(500);
+        }
+
+        throw new IllegalStateException("Not all packing campaign orders reached AWB bill status 'Da in' within "
+                + timeoutMillis
+                + "ms. Scanned="
+                + String.join(",", scannedOrderCodes)
+                + ". AWB statuses="
+                + awbStatusSummary()
+                + ". Screen="
+                + summarizeScreenText());
     }
 
     public String waitForAnyToast(long timeoutMillis) {
@@ -163,6 +240,215 @@ public class PackingCampaignPage extends BasePage {
                     + materialCode
                     + ". Screen="
                     + summarizeScreenText(), e);
+        }
+    }
+
+    private String firstVisiblePrintedAwbOrderCodeNow(Set<String> scannedOrderCodes) {
+        int orderColumnIndex = headerIndex("don hang", 1);
+        int awbColumnIndex = headerIndex("awb", 3);
+        for (WebElement row : driver.findElements(productRows)) {
+            if (!displayed(row)) {
+                continue;
+            }
+            List<WebElement> cells = row.findElements(tableCells);
+            int requiredCellCount = Math.max(orderColumnIndex, awbColumnIndex) + 1;
+            if (cells.size() < requiredCellCount) {
+                continue;
+            }
+            String awbStatus = normalize(cells.get(awbColumnIndex).getText());
+            if (!awbStatus.contains("da in") || awbStatus.contains("dang in")) {
+                continue;
+            }
+            String orderCode = extractOrderCode(cells.get(orderColumnIndex).getText());
+            if (!orderCode.isBlank() && !scannedOrderCodes.contains(orderCode)) {
+                return orderCode;
+            }
+        }
+        return null;
+    }
+
+    private void scanOrderConfirmationCode(String orderCode) {
+        WebElement input = wait.until(driver -> findInputByPlaceholderNow("ma don hang"));
+        scanIntoInput(input, orderCode);
+        System.out.println("Scanned packing campaign order after AWB bill was printed: " + orderCode);
+        waitForOrderConfirmationToast(orderCode);
+        waitForOrderScanInputReady();
+    }
+
+    private void waitForOrderConfirmationToast(String orderCode) {
+        long timeoutMillis = Long.parseLong(ConfigReader.getOrDefault(
+                "PACKING_CAMPAIGN_ORDER_CONFIRM_TOAST_TIMEOUT_MS",
+                "10000"));
+        try {
+            shortWait(timeoutMillis).until(driver -> {
+                String normalizedOrderCode = normalize(orderCode);
+                for (WebElement toast : driver.findElements(toastMessage)) {
+                    if (!displayed(toast)) {
+                        continue;
+                    }
+                    String text = normalize(toast.getText());
+                    if (text.contains(normalizedOrderCode) && text.contains("thanh cong")) {
+                        return true;
+                    }
+                }
+                return null;
+            });
+            System.out.println("Confirmed packing campaign order toast: " + orderCode);
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("Packing campaign success toast was not shown after scanning order "
+                    + orderCode
+                    + ". Screen="
+                    + summarizeScreenText(), e);
+        }
+    }
+
+    private void waitForOrderScanInputReady() {
+        try {
+            shortWait(5000).until(driver -> findInputByPlaceholderNow("ma don hang") != null ? true : null);
+        } catch (RuntimeException e) {
+            System.out.println("Order scan input was not ready immediately after success toast; continuing with main wait");
+        }
+    }
+
+    private int headerIndex(String keyword, int fallbackIndex) {
+        List<WebElement> headers = driver.findElements(tableHeaders);
+        for (int index = 0; index < headers.size(); index++) {
+            WebElement header = headers.get(index);
+            if (displayed(header) && normalize(header.getText()).contains(keyword)) {
+                return index;
+            }
+        }
+        return fallbackIndex;
+    }
+
+    private String extractOrderCode(String text) {
+        if (text == null) {
+            return "";
+        }
+        Matcher matcher = Pattern.compile("[A-Z]{2,}[A-Z0-9-]*\\d[A-Z0-9-]*")
+                .matcher(text.replaceAll("\\s+", " ").trim());
+        return matcher.find() ? matcher.group() : "";
+    }
+
+    private String awbStatusSummary() {
+        int orderColumnIndex = headerIndex("don hang", 1);
+        int awbColumnIndex = headerIndex("awb", 3);
+        StringBuilder builder = new StringBuilder();
+        int rowCount = 0;
+        for (WebElement row : driver.findElements(productRows)) {
+            if (!displayed(row)) {
+                continue;
+            }
+            List<WebElement> cells = row.findElements(tableCells);
+            int requiredCellCount = Math.max(orderColumnIndex, awbColumnIndex) + 1;
+            if (cells.size() < requiredCellCount) {
+                continue;
+            }
+            if (rowCount > 0) {
+                builder.append("; ");
+            }
+            builder.append(extractOrderCode(cells.get(orderColumnIndex).getText()))
+                    .append("=")
+                    .append(cells.get(awbColumnIndex).getText().replaceAll("\\s+", " ").trim());
+            rowCount++;
+            if (rowCount >= 8) {
+                break;
+            }
+        }
+        return builder.toString();
+    }
+
+    private boolean isOrderConfirmationListOpenNow() {
+        return findInputByPlaceholderNow("ma don hang") != null && hasAwbBillRowsNow();
+    }
+
+    private boolean hasAwbBillRowsNow() {
+        int orderColumnIndex = headerIndex("don hang", 1);
+        int awbColumnIndex = headerIndex("awb", 3);
+        for (WebElement row : driver.findElements(productRows)) {
+            if (!displayed(row)) {
+                continue;
+            }
+            List<WebElement> cells = row.findElements(tableCells);
+            int requiredCellCount = Math.max(orderColumnIndex, awbColumnIndex) + 1;
+            if (cells.size() < requiredCellCount) {
+                continue;
+            }
+            String orderCode = extractOrderCode(cells.get(orderColumnIndex).getText());
+            String awbStatus = normalize(cells.get(awbColumnIndex).getText());
+            if (!orderCode.isBlank() && (awbStatus.contains("dang in") || awbStatus.contains("da in"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasVisibleUnscannedPrintingAwbRows(Set<String> scannedOrderCodes) {
+        int orderColumnIndex = headerIndex("don hang", 1);
+        int awbColumnIndex = headerIndex("awb", 3);
+        for (WebElement row : driver.findElements(productRows)) {
+            if (!displayed(row)) {
+                continue;
+            }
+            List<WebElement> cells = row.findElements(tableCells);
+            int requiredCellCount = Math.max(orderColumnIndex, awbColumnIndex) + 1;
+            if (cells.size() < requiredCellCount) {
+                continue;
+            }
+            String orderCode = extractOrderCode(cells.get(orderColumnIndex).getText());
+            if (orderCode.isBlank() || scannedOrderCodes.contains(orderCode)) {
+                continue;
+            }
+            String awbStatus = normalize(cells.get(awbColumnIndex).getText());
+            if (awbStatus.contains("dang in")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void scrollOrderListToTop() {
+        ((JavascriptExecutor) driver).executeScript(
+                "const visible = el => { const r = el.getBoundingClientRect();"
+                        + " return r.width > 0 && r.height > 0; };"
+                        + "const rows = Array.from(document.querySelectorAll('tbody tr,[role=\"row\"]'))"
+                        + " .filter(visible);"
+                        + "if (!rows.length) return false;"
+                        + "let node = rows[0].parentElement;"
+                        + "while (node && node !== document.body) {"
+                        + "  if (node.scrollHeight > node.clientHeight + 5) { node.scrollTop = 0; return true; }"
+                        + "  node = node.parentElement;"
+                        + "}"
+                        + "return false;");
+    }
+
+    private boolean scrollOrderListDown() {
+        Object result = ((JavascriptExecutor) driver).executeScript(
+                "const visible = el => { const r = el.getBoundingClientRect();"
+                        + " return r.width > 0 && r.height > 0; };"
+                        + "const rows = Array.from(document.querySelectorAll('tbody tr,[role=\"row\"]'))"
+                        + " .filter(visible);"
+                        + "if (!rows.length) return false;"
+                        + "let node = rows[0].parentElement;"
+                        + "while (node && node !== document.body) {"
+                        + "  if (node.scrollHeight > node.clientHeight + 5) {"
+                        + "    const before = node.scrollTop;"
+                        + "    node.scrollTop = Math.min(node.scrollTop + Math.max(120, node.clientHeight * 0.8),"
+                        + "      node.scrollHeight - node.clientHeight);"
+                        + "    return node.scrollTop > before + 1;"
+                        + "  }"
+                        + "  node = node.parentElement;"
+                        + "}"
+                        + "return false;");
+        return Boolean.TRUE.equals(result);
+    }
+
+    private void sleepAfterOrderScan(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting for packing campaign order list", e);
         }
     }
 

@@ -292,6 +292,20 @@ public class InboundProductTest extends BaseTest {
                 "Invalid BATCH inspection should not complete box " + openedProduct.boxCode);
     }
 
+    @Test
+    public void inspectBatchInboundHappyCase() {
+        InboundCreationFlow inboundCreationFlow = new InboundCreationFlow(driver);
+        String inboundCode = inboundCreationFlow.createApprovedInboundPackages(
+                singleProductInboundPackages("BATCH-AT", 1));
+
+        driver.get(url("WMS", "/login"));
+        String token = AuthHelper.loginWms(driver);
+        WmsApiClient wmsApiClient = new WmsApiClient();
+
+        markReceivedIfAllowed(wmsApiClient, inboundCode, token);
+        inspectSingleProductHappyCase(wmsApiClient, inboundCode, token);
+    }
+
     private List<String> waitForRemainingBoxesAfterInspection(
             WmsApiClient wmsApiClient,
             String inboundCode,
@@ -527,7 +541,7 @@ public class InboundProductTest extends BaseTest {
         List<String> remainingBoxes = waitForRemainingBoxesAfterInspection(wmsApiClient, inboundCode, token);
         Assert.assertFalse(
                 remainingBoxes.contains(openedProduct.boxCode),
-                "Happy FEFO inspection should complete box " + openedProduct.boxCode);
+                "Happy inbound inspection should complete box " + openedProduct.boxCode);
     }
 
     private OpenedInboundProduct openFirstProductForInspection(

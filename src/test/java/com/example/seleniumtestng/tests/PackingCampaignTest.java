@@ -1,12 +1,19 @@
 package com.example.seleniumtestng.tests;
 
 import com.example.seleniumtestng.base.BaseTest;
+import com.example.seleniumtestng.clients.WmsApiClient;
 import com.example.seleniumtestng.config.ConfigReader;
 import com.example.seleniumtestng.flows.AuthHelper;
 import com.example.seleniumtestng.flows.PickingPreparationFlow;
+import com.example.seleniumtestng.models.CampaignAwbList;
+import com.example.seleniumtestng.models.CampaignAwbTracking;
+import com.example.seleniumtestng.models.OrderAwbInfo;
 import com.example.seleniumtestng.models.PickupDetail;
 import com.example.seleniumtestng.pages.PickAndPackOrderPage;
 import com.example.seleniumtestng.pages.PackingCampaignPage;
+import com.example.seleniumtestng.utils.AwbPdfVerifier;
+import java.util.ArrayList;
+import java.util.List;
 import org.openqa.selenium.JavascriptExecutor;
 import org.testng.Assert;
 import org.testng.annotations.BeforeMethod;
@@ -36,6 +43,7 @@ public class PackingCampaignTest extends BaseTest {
                 "PACKING_CAMPAIGN_PACKING_MATERIAL_CODE",
                 ConfigReader.getOrDefault("DEFAULT_PACKING_MATERIAL_CODE", "40x20x20"));
 
+        WmsApiClient wmsApiClient = new WmsApiClient();
         PickupDetail pickupDetail = new PickingPreparationFlow(driver).prepareForPacking(pickupCode, token);
         receivePackingTrolleyIfNeeded(pickupCode, pickupDetail);
         packingCampaignPage.openCampaignForPacking(tableCode, pickupCode);
@@ -45,10 +53,30 @@ public class PackingCampaignTest extends BaseTest {
                         + pickupCode
                         + ". Current URL: "
                         + driver.getCurrentUrl());
-        Assert.assertTrue(packingCampaignPage.isPackingMaterialScannerOpen(),
-                "WMS should show packing material scanner after scanning pickup " + pickupCode);
+        Assert.assertTrue(
+                packingCampaignPage.isPackingMaterialScannerOpen()
+                        || packingCampaignPage.isOrderConfirmationListOpen(),
+                "WMS should show packing material scanner or order confirmation list after scanning pickup "
+                        + pickupCode);
 
-        packingCampaignPage.scanPackingMaterial(packingMaterialCode);
+        packingCampaignPage.scanPackingMaterialIfPresent(packingMaterialCode);
+        CampaignAwbList campaignAwbList = wmsApiClient.getCampaignAwbList(pickupCode, token);
+        new AwbPdfVerifier().verifyCampaignAwbPdfs(
+                campaignAwbList,
+                orderAwbInfos(wmsApiClient, campaignAwbList, token));
+        List<String> orderCodes = packingCampaignPage.waitForAllAwbBillsPrintedAndScanOrders();
+        Assert.assertFalse(orderCodes.isEmpty(), "Packing campaign should scan at least one order after AWB bill printed");
+    }
+
+    private List<OrderAwbInfo> orderAwbInfos(
+            WmsApiClient wmsApiClient,
+            CampaignAwbList campaignAwbList,
+            String token) {
+        List<OrderAwbInfo> infos = new ArrayList<>();
+        for (CampaignAwbTracking tracking : campaignAwbList.trackings()) {
+            infos.add(wmsApiClient.getOrderAwbInfo(tracking.trackingCode(), token));
+        }
+        return infos;
     }
 
     private void clearBrowserStorage() {
