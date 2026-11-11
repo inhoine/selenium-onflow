@@ -3,6 +3,8 @@ package com.example.seleniumtestng.pages;
 import java.text.Normalizer;
 import java.util.List;
 import java.util.StringJoiner;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
@@ -103,6 +105,47 @@ public class CreatePickupOrderPage extends BasePage {
 
     public String getPickUpOrderCreatedMessage() {
         return visible(notificationSuccess).getText().trim();
+    }
+
+    public String getCreatedPickupCodeIfPresent() {
+        // 1. Check if URL changed to /pickup-detail/{code}
+        try {
+            shortWait(3000).until(d -> d.getCurrentUrl().contains("/pickup-detail/"));
+            String url = driver.getCurrentUrl();
+            Matcher m = Pattern.compile("/pickup-detail/([^/?#]+)").matcher(url);
+            if (m.find()) {
+                return m.group(1).trim();
+            }
+        } catch (Exception ignored) {
+        }
+
+        // 2. Check toast message for digits (e.g. "Tạo bảng kê 104250 thành công !")
+        try {
+            String toastText = getPickUpOrderCreatedMessage();
+            if (toastText != null && !toastText.isBlank()) {
+                Matcher m = Pattern.compile("\\b(\\d{5,})\\b").matcher(toastText);
+                if (m.find()) {
+                    return m.group(1).trim();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        // 3. Check first row in pickup list table if visible on /pickup-order
+        try {
+            WebElement firstCodeElem = findVisible(
+                    By.xpath("//table//tbody//tr[1]//td[contains(@class,'pickup') or contains(@class,'code') or 1]//a | //table//tbody//tr[1]//td[1]"),
+                    2000);
+            if (firstCodeElem != null) {
+                String text = firstCodeElem.getText().trim();
+                if (text.matches("\\d+")) {
+                    return text;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        return null;
     }
 
     private By exactOption(String value) {

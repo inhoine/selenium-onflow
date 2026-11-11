@@ -1,17 +1,24 @@
 package com.example.seleniumtestng.tests;
-import com.example.seleniumtestng.base.BaseTest;
 
+import com.example.seleniumtestng.base.BaseTest;
 import com.example.seleniumtestng.clients.WmsApiClient;
 import com.example.seleniumtestng.config.ConfigReader;
 import com.example.seleniumtestng.flows.AuthHelper;
 import com.example.seleniumtestng.models.RmaReturnOrder;
 import com.example.seleniumtestng.pages.ReturnRmaInspectionPage;
+import io.qameta.allure.Epic;
+import io.qameta.allure.Feature;
+import io.qameta.allure.Severity;
+import io.qameta.allure.SeverityLevel;
+import io.qameta.allure.Story;
 import java.util.List;
 import org.openqa.selenium.JavascriptExecutor;
 import org.testng.Assert;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
+@Epic("WMS - Hàng Hoàn")
+@Feature("Kiểm Hàng Hoàn (RMA Inspection)")
 public class ReturnRmaInspectionTest extends BaseTest {
     private ReturnRmaInspectionPage returnRmaInspectionPage;
     private WmsApiClient wmsApiClient;
@@ -27,7 +34,9 @@ public class ReturnRmaInspectionTest extends BaseTest {
         wmsApiClient = new WmsApiClient();
     }
 
-    @Test
+    @Test(description = "Verify inspection and processing of return orders by RMA code")
+    @Story("Kiểm hàng hoàn theo mã RMA và xử lý từng đơn hoàn trả")
+    @Severity(SeverityLevel.CRITICAL)
     public void inspectRmaReturnOrders() {
         String rmaCode = ConfigReader.getOrDefault("RMA_CODE", "RMA-330496");
         String tableCode = ConfigReader.getOrDefault(

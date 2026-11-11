@@ -4,371 +4,171 @@ import com.example.seleniumtestng.base.BaseTest;
 import com.example.seleniumtestng.clients.WmsApiClient;
 import com.example.seleniumtestng.config.ConfigReader;
 import com.example.seleniumtestng.flows.AuthHelper;
+import com.example.seleniumtestng.flows.PickingPreparationFlow;
+import com.example.seleniumtestng.flows.PickupResolver;
 import com.example.seleniumtestng.models.PackingOrder;
 import com.example.seleniumtestng.models.PickOrderBasket;
 import com.example.seleniumtestng.models.PickupDetail;
-import com.example.seleniumtestng.pages.EquipmentPage;
 import com.example.seleniumtestng.pages.PickAndPackOrderPage;
-import java.util.ArrayList;
-import java.util.HashSet;
+import com.example.seleniumtestng.utils.Log;
+import io.qameta.allure.Epic;
+import io.qameta.allure.Feature;
+import io.qameta.allure.Severity;
+import io.qameta.allure.SeverityLevel;
+import io.qameta.allure.Step;
+import io.qameta.allure.Story;
 import java.util.List;
-import java.util.Set;
 import org.openqa.selenium.JavascriptExecutor;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
+/**
+ * Functional test for WMS Pick & Pack workflows:
+ * - Pre-packing preparation (baskets/trolley assignment, picking commit)
+ * - Packing execution (MSO baskets packing or single order suggestion)
+ * - Handover confirmation
+ */
+@Epic("WMS - Lấy Hàng & Đóng Gói")
+@Feature("Quy Trình Pick & Pack")
 public class PickPackTest extends BaseTest {
-    @Test
-    public void pickAndPackPickupOrder() {
-        String pickupId = ConfigReader.required("DEFAULT_PICKUP_ID");
-        String packingMaterialCode = ConfigReader.getOrDefault("DEFAULT_PACKING_MATERIAL_CODE", "40x20x20");
-        System.out.println("PickPack pickupId=" + pickupId + ", packingMaterialCode=" + packingMaterialCode);
 
+    @Test(description = "Verify pick and pack workflow for pickup order in WMS")
+    @Story("Chuẩn bị rổ/xe hàng, xác nhận lấy hàng và đóng gói theo gợi ý hệ thống")
+    @Severity(SeverityLevel.BLOCKER)
+    public void pickAndPackPickupOrder() {
         driver.manage().deleteAllCookies();
         driver.get(url("WMS", "/login"));
         clearBrowserStorage();
         String token = AuthHelper.loginWms(driver);
 
         WmsApiClient wmsApiClient = new WmsApiClient();
-        EquipmentPage equipmentPage = new EquipmentPage(driver);
+        PickingPreparationFlow pickingFlow = new PickingPreparationFlow(driver);
         PickAndPackOrderPage pickAndPackOrderPage = new PickAndPackOrderPage(driver);
-        PickupDetail pickupDetail = wmsApiClient.getPickupDetailInfo(pickupId, token);
-        int basketCount = basketCountFor(pickupDetail);
-        boolean b2bPacking = isB2bPickup(pickupDetail);
-        System.out.println("Pickup detail: code=" + pickupDetail.pickupCode()
-                + ", internalId=" + pickupDetail.pickupId()
-                + ", type=" + pickupDetail.pickupType()
-                + ", totalOrder=" + pickupDetail.totalOrder()
-                + ", basketCount=" + basketCount
-                + ", basketCodes=" + String.join(",", pickupDetail.basketCodes()));
 
-        List<String> basketCodes = new ArrayList<>(pickupDetail.basketCodes());
-        List<String> basketCodesToAssign = new ArrayList<>();
-        boolean basketAlreadyAssigned = basketCount > 0 && basketCodes.size() >= basketCount;
-        String pickingEquipmentCode = null;
-        if (basketCount > 0) {
-            if (basketAlreadyAssigned) {
-                System.out.println("Use existing basket codes from pickup detail: " + String.join(",", basketCodes));
-            } else {
-                driver.get(url("WMS", "/equipments?page=1&page_size=50"));
-                int missingBasketCount = basketCount - basketCodes.size();
-                basketCodesToAssign = addEquipments(
-                        equipmentPage,
-                        missingBasketCount,
-                        basketEquipmentGroup(),
-                        basketEquipmentType(),
-                        basketEquipmentSize());
-                basketCodes.addAll(basketCodesToAssign);
-            }
-            Assert.assertEquals(basketCodes.size(), basketCount,
-                    "Basket pickup type requires basket count to match expected pickup orders");
-        } else {
-            driver.get(url("WMS", "/equipments?page=1&page_size=50"));
-            pickingEquipmentCode = addEquipment(equipmentPage, trolleyEquipmentGroup(), trolleyEquipmentType(), null);
-        }
-
-        driver.get(url("WMS", "/pickup-detail/" + pickupId));
-        if (basketCount > 0) {
-            if (basketAlreadyAssigned) {
-                System.out.println("Skip assign basket: pickup detail already has basket codes");
-            } else {
-                String trolleyId = wmsApiClient.getPickingTrolleyId(pickupId, token);
-                wmsApiClient.assignBasketsToPickOrder(trolleyId, basketCodesToAssign, token);
-                System.out.println("Assigned basket codes to pickup " + pickupId
-                        + ", trolleyId=" + trolleyId
-                        + ": " + String.join(",", basketCodesToAssign));
-            }
-            prepareBasketPickingIfNeeded(wmsApiClient, pickupId, token);
-        } else {
-            preparePickingIfNeeded(wmsApiClient, pickupId, pickingEquipmentCode, token);
-        }
-
+        PickupResolver pickupResolver = new PickupResolver(driver, wmsApiClient);
+        List<String> pickupIds = pickupResolver.resolvePickupIds(token);
+        String packingMaterialCode = ConfigReader.getOrDefault("DEFAULT_PACKING_MATERIAL_CODE", "40x20x20");
         String packingTableCode = ConfigReader.required("DEFAULT_PACKING_TABLE_CODE");
+        Log.info("Start PickPack test for {} pickup(s): {}, packingMaterialCode={}, packingTableCode={}",
+                pickupIds.size(), pickupIds, packingMaterialCode, packingTableCode);
+
+        for (int i = 0; i < pickupIds.size(); i++) {
+            String pickupId = pickupIds.get(i);
+            Log.info("====================================================================");
+            Log.info(">>> Processing Pickup [{}/{}]: pickupId={}", (i + 1), pickupIds.size(), pickupId);
+            Log.info("====================================================================");
+            token = AuthHelper.getWmsToken(driver);
+            processPickupWorkflow(pickupId, token, wmsApiClient, pickingFlow, pickAndPackOrderPage, packingMaterialCode,
+                    packingTableCode);
+        }
+    }
+
+    private void processPickupWorkflow(
+            String pickupId,
+            String token,
+            WmsApiClient wmsApiClient,
+            PickingPreparationFlow pickingFlow,
+            PickAndPackOrderPage pickAndPackOrderPage,
+            String packingMaterialCode,
+            String packingTableCode) {
+
+        // 1. Prepare picking (baskets/trolley)
+        PickupDetail pickupDetail = preparePickingStep(pickingFlow, pickupId, token);
+        if (ConfigReader.getBoolean("PICKPACK_PREPARE_ONLY", false)) {
+            Log.info("PICKPACK_PREPARE_ONLY=true: Đã hoàn tất bước 1 (Chuẩn bị lấy hàng) cho pickup {}", pickupId);
+            return;
+        }
+        int basketCount = pickingFlow.basketCountFor(pickupDetail);
+        boolean b2bPacking = pickingFlow.isB2bPickup(pickupDetail);
+
+        // 2. Receive trolley if non-basket pickup
         boolean packingTableScanned = false;
         if (basketCount == 0) {
-            pickAndPackOrderPage.receivePackingTrolley(pickupId);
-            pickAndPackOrderPage.verifyToastMessageIfPresent("Nhận bảng kê thành công", 5000);
-            System.out.println("Packing page: " + (b2bPacking ? "/packing-b2b" : "/packing"));
-            scanPackingTable(pickAndPackOrderPage, packingTableCode, b2bPacking);
+            receiveTrolleyStep(pickAndPackOrderPage, pickingFlow, pickupId, packingTableCode, b2bPacking);
             packingTableScanned = true;
-        } else {
-            System.out.println("Skip receive packing trolley for basket pickup type: " + pickupDetail.pickupType());
         }
 
+        // 3. Process packing
         List<PackingOrder> packingOrders = wmsApiClient.getPickupPackingOrders(pickupId, token);
         Assert.assertFalse(packingOrders.isEmpty(), "No packing orders found for pickup " + pickupId);
+
         int processedOrderCount;
-        if (isMsoPickup(pickupDetail)) {
-            List<PickOrderBasket> pickOrderBaskets = wmsApiClient.getPickOrderBaskets(pickupId, token);
-            List<PickOrderBasket> readyBaskets = readyPackingBaskets(
-                    pickOrderBaskets,
-                    basketCodes);
-            if (readyBaskets.isEmpty()) {
-                Assert.assertTrue(allExpectedBasketsAreReadyToShip(pickOrderBaskets, basketCodes),
-                        "MSO pickup has no basket with status_id=502/503 and not all expected baskets are status_id=504");
-                System.out.println("All MSO baskets are already packed and ready to ship. Skip packing.");
+        if (pickingFlow.isMsoPickup(pickupDetail)) {
+            processedOrderCount = packMsoOrdersStep(wmsApiClient, pickingFlow, pickAndPackOrderPage,
+                    pickupId, pickupDetail, packingOrders, packingMaterialCode, packingTableCode, b2bPacking, token);
+            if (processedOrderCount == 0) {
                 return;
             }
-            processedOrderCount = packMsoBaskets(
-                    pickAndPackOrderPage,
-                    readyBaskets,
-                    packingOrders,
-                    packingMaterialCode,
-                    packingTableCode,
-                    b2bPacking);
-            Assert.assertEquals(processedOrderCount, readyBaskets.size(),
-                    "MSO packing should process one order per basket with status_id=502/503");
         } else {
-            if (!packingTableScanned) {
-                System.out.println("Packing page: " + (b2bPacking ? "/packing-b2b" : "/packing"));
-                scanPackingTable(pickAndPackOrderPage, packingTableCode, b2bPacking);
-            }
-            String packingScanCode = basketCount > 0 ? basketCodes.get(0) : pickupId;
-            pickAndPackOrderPage.scanPickUpOrder(packingScanCode);
-            processedOrderCount = pickAndPackOrderPage.packBySystemSuggestion(packingOrders, packingMaterialCode);
-            pickAndPackOrderPage.assertAllOrdersPacked(pickupId);
+            processedOrderCount = packSingleOrSuggestionOrdersStep(pickingFlow, pickAndPackOrderPage,
+                    pickupId, pickupDetail, packingOrders, packingMaterialCode, packingTableCode, b2bPacking,
+                    basketCount, packingTableScanned);
         }
-        handoverPackedOrdersIfEnabled(wmsApiClient, packingOrders, token);
-        if (isMsoPickup(pickupDetail)) {
+
+        // 4. Handover packed orders if enabled
+        handoverStep(pickingFlow, wmsApiClient, packingOrders, token);
+
+        if (pickingFlow.isMsoPickup(pickupDetail)) {
             Assert.assertTrue(processedOrderCount > 0, "No order was processed for pickup " + pickupId);
         }
     }
 
-    private void handoverPackedOrdersIfEnabled(
-            WmsApiClient wmsApiClient,
-            List<PackingOrder> packingOrders,
-            String token) {
-        boolean handoverEnabled = Boolean.parseBoolean(
-                ConfigReader.getOrDefault("DEFAULT_HANDOVER_ENABLED", "true"));
-        if (!handoverEnabled) {
-            System.out.println("Skip handover: DEFAULT_HANDOVER_ENABLED=false");
-            return;
-        }
-
-        String handoverCode = wmsApiClient.handoverPackedOrders(
-                packingOrders,
-                ConfigReader.getOrDefault("DEFAULT_HANDOVER_COURIER_CODE", "DFX"),
-                ConfigReader.getOrDefault("DEFAULT_HANDOVER_DRIVER_NAME", "ttt"),
-                ConfigReader.getOrDefault("DEFAULT_HANDOVER_DRIVER_PHONE", "555"),
-                ConfigReader.getOrDefault("DEFAULT_HANDOVER_DRIVER_LICENSE_NUMBER", "ggg"),
-                token);
-        Assert.assertFalse(handoverCode.isBlank(), "Handover code should not be blank");
+    @Step("1. Chuẩn bị xe/rổ lấy hàng cho pickup {pickupId}")
+    private PickupDetail preparePickingStep(PickingPreparationFlow flow, String pickupId, String token) {
+        return flow.prepareForPacking(pickupId, token);
     }
 
-    private int packMsoBaskets(
-            PickAndPackOrderPage pickAndPackOrderPage,
-            List<PickOrderBasket> baskets,
-            List<PackingOrder> packingOrders,
-            String packingMaterialCode,
-            String packingTableCode,
-            boolean b2bPacking) {
-        int processedOrderCount = 0;
-        for (PickOrderBasket basket : baskets) {
-            Assert.assertNotNull(basket.trackingCode(),
-                    "MSO basket has no mapped tracking/order code: " + basket.code());
-            PackingOrder packingOrder = packingOrderByTrackingCode(packingOrders, basket.trackingCode());
-            scanPackingTable(pickAndPackOrderPage, packingTableCode, b2bPacking);
-            pickAndPackOrderPage.scanPickUpOrder(basket.code());
-            String processedTrackingCode = pickAndPackOrderPage.packOneOrderBySystemSuggestion(
-                    packingOrder,
-                    packingMaterialCode);
-            Assert.assertNotNull(processedTrackingCode,
-                    "No packing order was processed for basket " + basket.code());
-            System.out.println("Packed MSO basket=" + basket.code() + ", tracking=" + processedTrackingCode);
-            processedOrderCount++;
+    @Step("2. Nhận bảng kê và quét bàn đóng gói ({packingTableCode})")
+    private void receiveTrolleyStep(PickAndPackOrderPage page, PickingPreparationFlow flow, String pickupId,
+            String packingTableCode, boolean b2bPacking) {
+        page.receivePackingTrolley(pickupId);
+        page.verifyToastMessageIfPresent("Nhận bảng kê thành công", 5000);
+        flow.scanPackingTable(page, packingTableCode, b2bPacking);
+    }
+
+    @Step("3. Đóng gói đơn hàng MSO theo danh sách rổ")
+    private int packMsoOrdersStep(WmsApiClient apiClient, PickingPreparationFlow flow, PickAndPackOrderPage page,
+            String pickupId, PickupDetail pickupDetail, List<PackingOrder> packingOrders,
+            String packingMaterialCode, String packingTableCode, boolean b2bPacking, String token) {
+        List<PickOrderBasket> pickOrderBaskets = apiClient.getPickOrderBaskets(pickupId, token);
+        List<PickOrderBasket> readyBaskets = flow.readyPackingBaskets(pickOrderBaskets, pickupDetail.basketCodes());
+        if (readyBaskets.isEmpty()) {
+            Assert.assertTrue(
+                    flow.allExpectedBasketsAreReadyToShip(pickOrderBaskets, pickupDetail.basketCodes()),
+                    "MSO pickup has no basket with status_id=502/503 and not all expected baskets are status_id=504");
+            Log.info("All MSO baskets are already packed and ready to ship. Skip packing.");
+            return 0;
         }
+        int processedOrderCount = flow.packMsoBaskets(
+                page, readyBaskets, packingOrders, packingMaterialCode, packingTableCode, b2bPacking);
+        Assert.assertEquals(processedOrderCount, readyBaskets.size(),
+                "MSO packing should process one order per basket with status_id=502/503");
         return processedOrderCount;
     }
 
-    private void scanPackingTable(
-            PickAndPackOrderPage pickAndPackOrderPage,
-            String packingTableCode,
-            boolean b2bPacking) {
-        if (b2bPacking) {
-            pickAndPackOrderPage.scanTablePackingB2b(packingTableCode);
-            return;
+    @Step("3. Đóng gói đơn hàng theo gợi ý hệ thống (Single / SSO)")
+    private int packSingleOrSuggestionOrdersStep(PickingPreparationFlow flow, PickAndPackOrderPage page,
+            String pickupId, PickupDetail pickupDetail,
+            List<PackingOrder> packingOrders, String packingMaterialCode,
+            String packingTableCode, boolean b2bPacking,
+            int basketCount, boolean packingTableScanned) {
+        if (!packingTableScanned) {
+            flow.scanPackingTable(page, packingTableCode, b2bPacking);
         }
-        pickAndPackOrderPage.scanTablePacking(packingTableCode);
+        String packingScanCode = basketCount > 0 ? pickupDetail.basketCodes().get(0) : pickupId;
+        page.scanPickUpOrder(packingScanCode);
+        int processed = page.packBySystemSuggestion(packingOrders, packingMaterialCode);
+        page.assertAllOrdersPacked(pickupId);
+        return processed;
     }
 
-    private List<PickOrderBasket> readyPackingBaskets(List<PickOrderBasket> baskets, List<String> expectedBasketCodes) {
-        Set<String> expectedCodes = new HashSet<>(expectedBasketCodes);
-        List<PickOrderBasket> readyBaskets = new ArrayList<>();
-        for (PickOrderBasket basket : baskets) {
-            if (!expectedCodes.isEmpty() && !expectedCodes.contains(basket.code())) {
-                System.out.println("Skip basket not attached to pickup detail: " + basket.code()
-                        + ", statusId=" + basket.statusId()
-                        + ", statusName=" + basket.statusName());
-                continue;
-            }
-            if (isBasketReadyForPacking(basket)) {
-                readyBaskets.add(basket);
-            } else {
-                System.out.println("Skip basket not ready for packing: " + basket.code()
-                        + ", statusId=" + basket.statusId()
-                        + ", statusName=" + basket.statusName());
-            }
-        }
-        System.out.println("MSO baskets ready for packing status_id=502/503: " + basketSummary(readyBaskets));
-        return readyBaskets;
-    }
-
-    private boolean isBasketReadyForPacking(PickOrderBasket basket) {
-        return basket.statusId() == 502 || basket.statusId() == 503;
-    }
-
-    private PackingOrder packingOrderByTrackingCode(List<PackingOrder> packingOrders, String trackingCode) {
-        for (PackingOrder order : packingOrders) {
-            if (trackingCode.equals(order.trackingCode())) {
-                return order;
-            }
-        }
-        throw new IllegalStateException("No packing order found for basket tracking code " + trackingCode);
-    }
-
-    private String basketSummary(List<PickOrderBasket> baskets) {
-        List<String> parts = new ArrayList<>();
-        for (PickOrderBasket basket : baskets) {
-            parts.add(basket.code() + "->" + basket.trackingCode());
-        }
-        return String.join(",", parts);
-    }
-
-    private boolean allExpectedBasketsAreReadyToShip(List<PickOrderBasket> baskets, List<String> expectedBasketCodes) {
-        Set<String> expectedCodes = new HashSet<>(expectedBasketCodes);
-        int matchedBasketCount = 0;
-        for (PickOrderBasket basket : baskets) {
-            if (!expectedCodes.isEmpty() && !expectedCodes.contains(basket.code())) {
-                continue;
-            }
-            matchedBasketCount++;
-            if (basket.statusId() != 504) {
-                System.out.println("MSO basket is not ready to ship yet: " + basket.code()
-                        + ", statusId=" + basket.statusId()
-                        + ", statusName=" + basket.statusName());
-                return false;
-            }
-        }
-        return matchedBasketCount > 0;
-    }
-
-    private List<String> addEquipments(
-            EquipmentPage equipmentPage,
-            int count,
-            String groupName,
-            String typeName,
-            String sizeName) {
-        List<String> equipmentCodes = new ArrayList<>();
-        for (int index = 0; index < count; index++) {
-            equipmentCodes.add(addEquipment(equipmentPage, groupName, typeName, sizeName));
-        }
-        return equipmentCodes;
-    }
-
-    private String addEquipment(EquipmentPage equipmentPage, String groupName, String typeName, String sizeName) {
-        String equipmentCode = equipmentPage.addEquipment(groupName, typeName, sizeName);
-        String equipmentToast = equipmentPage.waitForAnyToast();
-        Assert.assertFalse(equipmentToast.isBlank(), "Equipment creation toast is blank");
-        System.out.println("Created equipment: group=" + groupName
-                + ", type=" + typeName
-                + ", size=" + (sizeName == null ? "" : sizeName)
-                + ", code=" + equipmentCode
-                + ", toast=" + equipmentToast);
-        return equipmentCode;
-    }
-
-    private int basketCountFor(PickupDetail pickupDetail) {
-        String pickupType = pickupDetail.pickupType() == null ? "" : pickupDetail.pickupType().trim().toLowerCase();
-        if (pickupType.contains("sso")) {
-            return 1;
-        }
-        if (pickupType.contains("mso")) {
-            Assert.assertTrue(pickupDetail.totalOrder() > 0,
-                    "MSO pickup must have total_order > 0 to assign baskets");
-            return pickupDetail.totalOrder();
-        }
-        return 0;
-    }
-
-    private boolean isMsoPickup(PickupDetail pickupDetail) {
-        String pickupType = pickupDetail.pickupType() == null ? "" : pickupDetail.pickupType().trim().toLowerCase();
-        return pickupType.contains("mso");
-    }
-
-    private boolean isB2bPickup(PickupDetail pickupDetail) {
-        String pickupType = pickupDetail.pickupType() == null ? "" : pickupDetail.pickupType().trim().toLowerCase();
-        return pickupType.contains("b2b");
-    }
-
-    private String trolleyEquipmentGroup() {
-        return ConfigReader.getOrDefault(
-                "DEFAULT_TROLLEY_EQUIPMENT_GROUP",
-                ConfigReader.required("DEFAULT_EQUIPMENT_GROUP"));
-    }
-
-    private String trolleyEquipmentType() {
-        return ConfigReader.getOrDefault(
-                "DEFAULT_TROLLEY_EQUIPMENT_TYPE",
-                ConfigReader.required("DEFAULT_EQUIPMENT_TYPE"));
-    }
-
-    private String basketEquipmentGroup() {
-        return ConfigReader.getOrDefault("DEFAULT_BASKET_EQUIPMENT_GROUP", "Rổ");
-    }
-
-    private String basketEquipmentType() {
-        return ConfigReader.getOrDefault(
-                "DEFAULT_BASKET_EQUIPMENT_TYPE",
-                ConfigReader.required("DEFAULT_EQUIPMENT_TYPE"));
-    }
-
-    private String basketEquipmentSize() {
-        return ConfigReader.getOrDefault(
-                "DEFAULT_BASKET_SIZE",
-                ConfigReader.getOrDefault("CREATE_ORDER_ORDER_SIZE", "Nhỏ"));
+    @Step("4. Bàn giao đơn vị vận chuyển (Handover)")
+    private void handoverStep(PickingPreparationFlow flow, WmsApiClient apiClient, List<PackingOrder> packingOrders,
+            String token) {
+        flow.handoverPackedOrdersIfEnabled(apiClient, packingOrders, token);
     }
 
     private void clearBrowserStorage() {
         ((JavascriptExecutor) driver).executeScript("localStorage.clear(); sessionStorage.clear();");
-    }
-
-    private void preparePickingIfNeeded(WmsApiClient wmsApiClient, String pickupId, String equipmentCode, String token) {
-        runOptionalPrePackingStep("map trolley picking",
-                () -> wmsApiClient.mapTrolleyPicking(pickupId, equipmentCode, token));
-        runOptionalPrePackingStep("pick all products",
-                () -> wmsApiClient.pickAllProductsInPickup(pickupId, token));
-        runOptionalPrePackingStep("commit picking",
-                () -> wmsApiClient.commitPickingPickup(pickupId, equipmentCode, token));
-    }
-
-    private void prepareBasketPickingIfNeeded(WmsApiClient wmsApiClient, String pickupId, String token) {
-        runOptionalPrePackingStep("pick all products",
-                () -> wmsApiClient.pickAllProductsInPickup(pickupId, token));
-        runOptionalPrePackingStep("commit picking",
-                () -> wmsApiClient.commitPickingPickup(pickupId, pickupId, token));
-    }
-
-    private void runOptionalPrePackingStep(String stepName, Runnable step) {
-        try {
-            step.run();
-            System.out.println(stepName + " completed");
-        } catch (IllegalStateException error) {
-            if (isAlreadyPastPrePackingStep(error)) {
-                System.out.println(stepName + " skipped: pickup is already past this step. " + error.getMessage());
-                return;
-            }
-            throw error;
-        }
-    }
-
-    private boolean isAlreadyPastPrePackingStep(IllegalStateException error) {
-        String message = error.getMessage();
-        if (message == null) {
-            return false;
-        }
-        String normalized = message.toLowerCase();
-        return normalized.contains("không") && normalized.contains("phép")
-                || normalized.contains("not allowed")
-                || normalized.contains("no binset found");
     }
 }

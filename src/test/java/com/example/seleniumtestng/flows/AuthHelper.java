@@ -14,8 +14,18 @@ public final class AuthHelper {
     public static void loginOms(WebDriver driver) {
         AccountConfig.Credentials credentials = AccountConfig.oms();
         LoginPage loginPage = new LoginPage(driver);
-        loginPage.waitForLoginForm();
-        loginPage.login(credentials.email(), credentials.password());
+        new WebDriverWait(driver, Duration.ofSeconds(20)).until(d -> {
+            String currentUrl = String.valueOf(d.getCurrentUrl());
+            return !currentUrl.contains("/login") || !d
+                    .findElements(
+                            org.openqa.selenium.By.cssSelector("input[type='email'], input[placeholder*='email']"))
+                    .isEmpty();
+        });
+        if (String.valueOf(driver.getCurrentUrl()).contains("/login")) {
+            loginPage.login(credentials.email(), credentials.password());
+            new WebDriverWait(driver, Duration.ofSeconds(20))
+                    .until(d -> !String.valueOf(d.getCurrentUrl()).contains("/login"));
+        }
     }
 
     public static void loginOps(WebDriver driver) {
@@ -23,11 +33,15 @@ public final class AuthHelper {
         LoginPage loginPage = new LoginPage(driver);
         new WebDriverWait(driver, Duration.ofSeconds(20)).until(d -> {
             String currentUrl = String.valueOf(d.getCurrentUrl());
-            return !currentUrl.contains("/login") || !d.findElements(org.openqa.selenium.By.cssSelector("input[type='email'], input[placeholder*='email']")).isEmpty();
+            return !currentUrl.contains("/login") || !d
+                    .findElements(
+                            org.openqa.selenium.By.cssSelector("input[type='email'], input[placeholder*='email']"))
+                    .isEmpty();
         });
         if (String.valueOf(driver.getCurrentUrl()).contains("/login")) {
             loginPage.login(credentials.email(), credentials.password());
-            new WebDriverWait(driver, Duration.ofSeconds(20)).until(d -> !String.valueOf(d.getCurrentUrl()).contains("/login"));
+            new WebDriverWait(driver, Duration.ofSeconds(20))
+                    .until(d -> !String.valueOf(d.getCurrentUrl()).contains("/login"));
         }
     }
 

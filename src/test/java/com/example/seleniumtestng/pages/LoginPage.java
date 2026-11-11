@@ -14,7 +14,7 @@ public class LoginPage extends BasePage {
     private final By passwordInput = By.cssSelector("input[type='password']");
     private final By submitButton = By.cssSelector("button[type='submit']");
     private final By continueLoginButton = By.xpath("//button[contains(normalize-space(.),'Tiếp tục đăng nhập')]");
-    private final By confirmFcButton = By.xpath("//button[contains(normalize-space(.),'Bạn đã chọn FC') or contains(normalize-space(.),'Xác nhận')]");
+    private final By confirmFcButton = By.xpath("//button[contains(normalize-space(.),'Bạn đã chọn FC') or contains(normalize-space(.),'Xác nhận') or contains(normalize-space(.),'Tiếp tục với') or contains(normalize-space(.),'Tiep tuc voi')]");
     private final By logoutButton = By.xpath("//button[contains(normalize-space(.),'Đăng xuất') or contains(normalize-space(.),'Dang xuat')]");
     private final By errorMessages = By.xpath("//*[contains(@class,'ant-form-item-explain') or contains(@class,'error') or contains(@class,'invalid-feedback') or @role='alert'][normalize-space(string())!='']");
 
@@ -74,7 +74,7 @@ public class LoginPage extends BasePage {
     public void waitForLoginSuccess() {
         wait.withTimeout(Duration.ofSeconds(30)).until(driver -> {
             String url = String.valueOf(driver.getCurrentUrl());
-            if (url.contains("/dashboard") || url.contains("/home") || url.contains("/warehouse") || url.contains("/user-setting")) {
+            if (url.contains("/dashboard") || url.contains("/home") || url.contains("/warehouse") || url.contains("/user-setting") || url.contains("/packing")) {
                 return true;
             }
             return !driver.findElements(logoutButton).isEmpty();

@@ -5,12 +5,19 @@ import com.example.seleniumtestng.pages.AssignProductPage;
 import com.example.seleniumtestng.pages.ListingProductPage;
 import com.example.seleniumtestng.pages.ProductPage;
 import com.example.seleniumtestng.flows.AuthHelper;
+import io.qameta.allure.Epic;
+import io.qameta.allure.Feature;
+import io.qameta.allure.Severity;
+import io.qameta.allure.SeverityLevel;
+import io.qameta.allure.Story;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.testng.Assert;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
+@Epic("OMS - Quản Lý Sản Phẩm")
+@Feature("Tạo & Phân Bổ Sản Phẩm (Product Management)")
 public class ProductTest extends BaseTest {
     private static final String PRODUCT_LIST_PATH = "/products?page=1&page_size=50&return_type=list_linked_platform&status_group=all&type_filter=all";
     private static final String REQUIRED_INFO_ERROR = "Vui lòng điền đầy đủ thông tin";
@@ -24,7 +31,9 @@ public class ProductTest extends BaseTest {
         driver.get(url("OMS", PRODUCT_LIST_PATH));
     }
 
-    @Test
+    @Test(description = "Verify successful product creation in OMS and assignment in OPS")
+    @Story("Tạo sản phẩm mới với đầy đủ thông tin và gán vào kho")
+    @Severity(SeverityLevel.CRITICAL)
     public void createProductWithRequiredFields() {
         String mainWindowHandle = driver.getWindowHandle();
         ProductPage productPage = new ProductPage(driver);
@@ -76,7 +85,9 @@ public class ProductTest extends BaseTest {
         };
     }
 
-    @Test(dataProvider = "invalidProductScenarios")
+    @Test(dataProvider = "invalidProductScenarios", description = "Verify OMS product creation rejects missing required fields")
+    @Story("Kiểm tra thông báo lỗi khi thiếu các trường bắt buộc lúc tạo sản phẩm")
+    @Severity(SeverityLevel.NORMAL)
     public void createProductValidationScenarios(
             String name,
             String sku,

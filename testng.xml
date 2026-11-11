@@ -1,5 +1,15 @@
 <!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<!--
+  To enable parallel test execution across classes or tests, set:
+  parallel="classes" thread-count="2" (or "methods" / "tests")
+  DriverManager uses ThreadLocal<WebDriver> so concurrent tests are fully thread-safe.
+-->
 <suite name="Selenium Learning TestNG" parallel="false">
+    <listeners>
+        <listener class-name="com.example.seleniumtestng.listeners.TestListener"/>
+        <listener class-name="com.example.seleniumtestng.listeners.AnnotationTransformer"/>
+    </listeners>
+
     <parameter name="browser" value="chrome"/>
 
     <test name="Login">
@@ -35,6 +45,18 @@
     <test name="Packing Campaign">
         <classes>
             <class name="com.example.seleniumtestng.tests.PackingCampaignTest"/>
+        </classes>
+    </test>
+
+    <test name="Convert Goods">
+        <classes>
+            <class name="com.example.seleniumtestng.tests.ConvertGoodsTest"/>
+        </classes>
+    </test>
+
+    <test name="Return RMA Inspection">
+        <classes>
+            <class name="com.example.seleniumtestng.tests.ReturnRmaInspectionTest"/>
         </classes>
     </test>
 </suite>

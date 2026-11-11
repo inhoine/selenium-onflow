@@ -31,14 +31,14 @@ public class ConvertGoodsPage extends BasePage {
             ".Toastify__toast-body, .ant-message-notice-content, .ant-notification-notice-message, .ant-notification-notice-description");
     private final By listRows = By.cssSelector("tbody tr");
     private final By listSearchInput = By.xpath(
-            "//input[contains(@placeholder,'TÃ¬m kiáº¿m') or contains(@placeholder,'Tim kiem') "
-                    + "or contains(@placeholder,'SKU') or contains(@placeholder,'sáº£n pháº©m') "
+            "//input[contains(@placeholder,'Tìm kiếm') or contains(@placeholder,'Tim kiem') "
+                    + "or contains(@placeholder,'SKU') or contains(@placeholder,'sản phẩm') "
                     + "or contains(@placeholder,'san pham')]");
     private final By actionMenuItems = By.xpath(
             "//*[contains(@class,'dropdown-menu') or contains(@class,'popover') or contains(@class,'menu') "
                     + "or contains(@class,'ant-dropdown')][not(contains(@style,'display: none'))]"
                     + "//*[self::button or self::a or self::li or self::div]"
-                    + "[contains(normalize-space(.),'Chi tiáº¿t') or contains(normalize-space(.),'Chi tiet') "
+                    + "[contains(normalize-space(.),'Chi tiết') or contains(normalize-space(.),'Chi tiet') "
                     + "or contains(normalize-space(.),'Xem')]");
 
     public ConvertGoodsPage(WebDriver driver) {
@@ -219,7 +219,7 @@ public class ConvertGoodsPage extends BasePage {
             return true;
         }
         return false && !driver.findElements(By.xpath(
-                "//*[contains(normalize-space(.),'Chi tiáº¿t') or contains(normalize-space(.),'Chi tiet')]"))
+                "//*[contains(normalize-space(.),'Chi tiết') or contains(normalize-space(.),'Chi tiet')]"))
                 .isEmpty();
     }
 
@@ -526,7 +526,7 @@ public class ConvertGoodsPage extends BasePage {
         }
 
         WebElement directDetail = firstVisibleEnabled(row.findElements(By.xpath(
-                ".//*[self::a or self::button][contains(normalize-space(.),'Chi tiáº¿t') "
+                ".//*[self::a or self::button][contains(normalize-space(.),'Chi tiết') "
                         + "or contains(normalize-space(.),'Chi tiet') or contains(normalize-space(.),'Xem')]")));
         if (directDetail != null) {
             clickElement(directDetail);

@@ -1,5 +1,6 @@
-package com.example.seleniumtestng.pages;
+package com.example.seleniumtestng.pages.order;
 
+import com.example.seleniumtestng.pages.BasePage;
 import java.util.List;
 import org.openqa.selenium.By;
 import org.openqa.selenium.Keys;
@@ -7,27 +8,52 @@ import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 
+/**
+ * Page Object representing the OMS Outbound Create Order form.
+ * Handles customer, sales channel, warehouse pickup, SKU selection, and order creation submission.
+ */
 public class CreateOrderOmsPage extends BasePage {
-    private final By createOrderButton = By.xpath("(//button[contains(normalize-space(.),'Tạo đơn hàng') or contains(normalize-space(.),'Tao don hang')])[1]");
-    private final By createOrderMenu = By.xpath("(//div[contains(@class,'dropdown-menu') and contains(@class,'show')]//button[not(@disabled)])[1]");
-    private final By customerField = By.xpath("//div[contains(.,'Chọn khách hàng') or contains(.,'Chon khach hang')]/ancestor::div[contains(@class,'-control')]");
-    private final By customerInput = By.xpath("//div[contains(.,'Chọn khách hàng') or contains(.,'Chon khach hang')]/following::input[1]");
-    private final By saleStoreField = By.xpath("//div[contains(.,'Chọn kênh bán hàng') or contains(.,'Chon kenh ban hang')]/ancestor::div[contains(@class,'-control')]");
-    private final By saleStoreInput = By.xpath("//div[contains(.,'Chọn kênh bán hàng') or contains(.,'Chon kenh ban hang')]/following::input[1]");
-    private final By choosePickupField = By.xpath("//div[contains(.,'Chọn địa chỉ lấy hàng') or contains(.,'Chon dia chi lay hang')]/ancestor::div[contains(@class,'-control')]");
-    private final By choosePickupInput = By.xpath("//div[contains(.,'Chọn địa chỉ lấy hàng') or contains(.,'Chon dia chi lay hang')]/following::input[1]");
-    private final By addNewProductBtn = By.xpath("//button[normalize-space()='Thêm sản phẩm' or normalize-space()='Them san pham']");
-    private final By productDropdowns = By.xpath("//div[contains(.,'Chọn sản phẩm') or contains(.,'Chon san pham')]/ancestor::div[contains(@class,'-control')]");
-    private final By productQty = By.xpath("//input[contains(@placeholder,'số lượng') or contains(@placeholder,'so luong')]");
+    private final By createOrderButton = By.xpath(
+            "(//button[contains(normalize-space(.),'Tạo đơn hàng') or contains(normalize-space(.),'Tao don hang')])[1]");
+    private final By createOrderMenu = By
+            .xpath("(//div[contains(@class,'dropdown-menu') and contains(@class,'show')]//button[not(@disabled)])[1]");
+    private final By customerField = By.xpath(
+            "//div[contains(.,'Chọn khách hàng') or contains(.,'Chon khach hang')]/ancestor::div[contains(@class,'-control')]");
+    private final By customerInput = By
+            .xpath("//div[contains(.,'Chọn khách hàng') or contains(.,'Chon khach hang')]/following::input[1]");
+    private final By saleStoreField = By.xpath(
+            "//div[contains(.,'Chọn kênh bán hàng') or contains(.,'Chon kenh ban hang')]/ancestor::div[contains(@class,'-control')]");
+    private final By saleStoreInput = By
+            .xpath("//div[contains(.,'Chọn kênh bán hàng') or contains(.,'Chon kenh ban hang')]/following::input[1]");
+    private final By choosePickupField = By.xpath(
+            "//div[contains(.,'Chọn địa chỉ lấy hàng') or contains(.,'Chon dia chi lay hang')]/ancestor::div[contains(@class,'-control')]");
+    private final By choosePickupInput = By.xpath(
+            "//div[contains(.,'Chọn địa chỉ lấy hàng') or contains(.,'Chon dia chi lay hang')]/following::input[1]");
+    private final By addNewProductBtn = By
+            .xpath("//button[normalize-space()='Thêm sản phẩm' or normalize-space()='Them san pham']");
+    private final By productDropdowns = By.xpath(
+            "//div[contains(.,'Chọn sản phẩm') or contains(.,'Chon san pham')]/ancestor::div[contains(@class,'-control')]");
+    private final By productQty = By
+            .xpath("//input[contains(@placeholder,'số lượng') or contains(@placeholder,'so luong')]");
     private final By productTable = By.cssSelector(".order-products-table");
     private final By productRows = By.cssSelector(".order-products-table tbody tr");
-    private final By orderNumberField = By.xpath("//input[contains(@placeholder,'mã đơn hàng') or contains(@placeholder,'ma don hang')]");
+    private final By orderNumberField = By
+            .xpath("//input[contains(@placeholder,'mã đơn hàng') or contains(@placeholder,'ma don hang')]");
     private final By continueBtn = By.xpath("//button[normalize-space()='Tiếp theo' or normalize-space()='Tiep theo']");
-    private final By createBtn = By.xpath("//button[contains(@class,'btn-success') and (contains(normalize-space(.),'Tạo đơn') or contains(normalize-space(.),'Tao don'))]");
-    private final By confirmAndCreateBtn = By.xpath("//button[normalize-space()='Tạo và xử lý đơn hàng' or normalize-space()='Tao va xu ly don hang']");
+    private final By createBtn = By.xpath(
+            "//button[contains(@class,'btn-success') and (contains(normalize-space(.),'Tạo đơn') or contains(normalize-space(.),'Tao don'))]");
+    private final By confirmAndCreateBtn = By.xpath(
+            "//button[@role='menuitem' and (contains(.,'Tạo đơn và tạo vận đơn') or contains(.,'Tao don va tao van don'))] | //button[normalize-space()='Tạo và xử lý đơn hàng' or normalize-space()='Tao va xu ly don hang']");
+
+    private final OrderListingOmsPage orderListingPage;
 
     public CreateOrderOmsPage(WebDriver driver) {
         super(driver);
+        this.orderListingPage = new OrderListingOmsPage(driver);
+    }
+
+    public OrderListingOmsPage getOrderListingPage() {
+        return orderListingPage;
     }
 
     public void accessCreateOrder() {
@@ -97,12 +123,11 @@ public class CreateOrderOmsPage extends BasePage {
     }
 
     public void verifyCreatedOrder(String orderNumber) {
-        visible(By.xpath("//a[contains(@id,'partner_tracking_code') and normalize-space()=" + xpathText(orderNumber) + "]"));
+        orderListingPage.verifyCreatedOrder(orderNumber);
     }
 
     public String getTrackingCodeByOrderNumber(String orderNumber) {
-        WebElement trackingCode = visible(By.xpath("//a[normalize-space()=" + xpathText(orderNumber) + "]/ancestor::div[contains(@class,'flex-column')]//p[contains(@id,'tracking_code')]"));
-        return trackingCode.getText().trim();
+        return orderListingPage.getTrackingCodeByOrderNumber(orderNumber);
     }
 
     private void selectAutocompleteOption(By fieldLocator, By inputLocator, String value) {
@@ -161,3 +186,4 @@ public class CreateOrderOmsPage extends BasePage {
         });
     }
 }
+

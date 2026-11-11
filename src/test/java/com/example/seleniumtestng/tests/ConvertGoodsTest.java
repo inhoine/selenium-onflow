@@ -6,11 +6,18 @@ import com.example.seleniumtestng.flows.AuthHelper;
 import com.example.seleniumtestng.flows.ConvertGoodsFlow;
 import com.example.seleniumtestng.models.ConvertGoodsRequestData;
 import com.example.seleniumtestng.pages.ConvertGoodsPage;
+import io.qameta.allure.Epic;
+import io.qameta.allure.Feature;
+import io.qameta.allure.Severity;
+import io.qameta.allure.SeverityLevel;
+import io.qameta.allure.Story;
 import org.openqa.selenium.JavascriptExecutor;
 import org.testng.Assert;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
+@Epic("WMS - Sản Phẩm")
+@Feature("Chuyển Đổi Hàng Hóa (Convert Goods)")
 public class ConvertGoodsTest extends BaseTest {
     private ConvertGoodsPage convertGoodsPage;
 
@@ -23,7 +30,9 @@ public class ConvertGoodsTest extends BaseTest {
         convertGoodsPage = new ConvertGoodsPage(driver);
     }
 
-    @Test
+    @Test(description = "Verify creation of convert goods request in WMS")
+    @Story("Tạo yêu cầu chuyển đổi vị trí và phân loại hàng hóa")
+    @Severity(SeverityLevel.NORMAL)
     public void createConvertGoodsRequest() {
         ConvertGoodsRequestData data = defaultRequestData();
 
@@ -48,8 +57,7 @@ public class ConvertGoodsTest extends BaseTest {
                 ConfigReader.getOrDefault("CONVERT_GOODS_CURRENT_LOCATION", "VI-TRI-CHUA-2"),
                 ConfigReader.getOrDefault("CONVERT_GOODS_PENDING_LOCATION", "C-001"),
                 ConfigReader.getOrDefault("CONVERT_GOODS_REASON", "Automation convert goods request") + " " + runId,
-                ConfigReader.getOrDefault("CONVERT_GOODS_APPROVAL_REASON", "Automation approve convert goods request")
-                        + " " + runId,
+                ConfigReader.getOrDefault("CONVERT_GOODS_APPROVAL_REASON", "Automation approve convert goods request") + " " + runId,
                 ConfigReader.getOrDefault("CONVERT_GOODS_PUTAWAY_LOCATION", "TEST-D1-0300"));
     }
 }

@@ -11,6 +11,8 @@ target/
 screenshots/
 downloads/
 selenium-wms-profile/
+allure-results/
+allure-report/
 
 # IDE/editor settings
 .vscode/

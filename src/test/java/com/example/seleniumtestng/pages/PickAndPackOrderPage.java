@@ -3,33 +3,27 @@ package com.example.seleniumtestng.pages;
 import com.example.seleniumtestng.config.ConfigReader;
 import com.example.seleniumtestng.models.PackingOrder;
 import com.example.seleniumtestng.models.PickupItem;
+import com.example.seleniumtestng.pages.packing.AttachedDocumentModal;
+import com.example.seleniumtestng.pages.packing.PackagingMaterialHelper;
+import com.example.seleniumtestng.pages.packing.PackingProgressTracker;
+import com.example.seleniumtestng.pages.packing.ProductItemScanner;
+import com.example.seleniumtestng.utils.Log;
 import com.example.seleniumtestng.utils.ScanTable;
-import java.text.Normalizer;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.openqa.selenium.By;
 import org.openqa.selenium.ElementClickInterceptedException;
 import org.openqa.selenium.Keys;
-import org.openqa.selenium.StaleElementReferenceException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 
+/**
+ * Main Page Object for WMS Packing workflows:
+ * Orchestrates receiving trolleys, scanning tables, and packing orders.
+ * Delegated to modular sub-components for single responsibility.
+ */
 public class PickAndPackOrderPage extends BasePage {
-    private static final long CUSTOMER_MATERIAL_TOAST_TIMEOUT_MS = 300;
-    private static final long ATTACHED_DOCUMENT_CONFIRM_TIMEOUT_MS = 600;
-    private static final long ATTACHED_DOCUMENT_CLOSE_TIMEOUT_MS = 2000;
-    private static final String CUSTOMER_PACKING_MATERIAL_FALLBACK_CODE = "10x10x10";
-    private static final Pattern QUANTITY_PATTERN = Pattern.compile("(\\d+)\\s*/\\s*(\\d+)");
-
-    private final By scanPackingTrolleyField = By.xpath("//input[@placeholder='Quét mã XE/ bảng kê cần đóng gói']");
-    private final By receivePackingTrolleyBtn = By.xpath("//button[normalize-space()='Nhận bảng kê' or normalize-space()='Nhan bang ke']");
     private final By scanPickUpField = By.xpath("//input[contains(@placeholder,'Xe')"
             + " or contains(@placeholder,'Bảng kê')"
             + " or contains(@placeholder,'bảng kê')"
@@ -37,57 +31,59 @@ public class PickAndPackOrderPage extends BasePage {
             + " or contains(@placeholder,'bang ke')"
             + " or contains(@placeholder,'Rổ')"
             + " or contains(@placeholder,'Ro')]");
-    private final By scanSkuField = By.xpath("//input[contains(@placeholder,'Sản phẩm')"
-            + " or contains(@placeholder,'sản phẩm')"
-            + " or contains(@placeholder,'San pham')"
-            + " or contains(@placeholder,'san pham')]");
-    private final By packagingMaterialsField = By.xpath("//input[@placeholder='Quét hoặc nhập mã vật liệu đóng gói']");
-    private final By fallbackPackagingMaterial = By.xpath("//*[contains(normalize-space(.),'Băng keo') or contains(normalize-space(.),'Bang keo')]");
-    private final By productRows = By.xpath("//tr[.//div[contains(@id,'barcode_')]]");
-    private final By currentTrackingCode = By.xpath("//*[contains(normalize-space(.),'Bạn đang đóng gói cho đơn hàng')"
-            + " or contains(normalize-space(.),'Ban dang dong goi cho don hang')]");
-    private final By packingDetailToggle = By.xpath("//*[normalize-space()='(Chi tiết)' or normalize-space()='(Chi tiet)']");
-    private final By visibleModal = By.cssSelector(".modal.show");
-    private final By visibleModalCloseButton = By.xpath("//*[contains(@class,'modal') and contains(@class,'show')]//button[contains(@class,'btn-close') or @aria-label='Close' or normalize-space()='×' or normalize-space()='Đóng' or normalize-space()='Dong']");
-    private final By confirmScanPickupButton = By.xpath("//button[normalize-space()='Xác nhận' or normalize-space()='Xac nhan']");
-    private final Map<String, String> lastScannedSerialByBarcode = new HashMap<>();
-    private final Set<String> confirmedScannedSerialCodes = new HashSet<>();
+    private final By confirmScanPickupButton = By
+            .xpath("//button[normalize-space()='Xác nhận' or normalize-space()='Xac nhan']");
+    private final By packingDetailToggle = By
+            .xpath("//*[normalize-space()='(Chi tiết)' or normalize-space()='(Chi tiet)']");
+
+    private final ReceivePackingTrolleyPage receivePackingTrolleyPage;
+    private final AttachedDocumentModal attachedDocumentModal;
+    private final PackagingMaterialHelper packagingMaterialHelper;
+    private final PackingProgressTracker progressTracker;
+    private final ProductItemScanner productItemScanner;
 
     public PickAndPackOrderPage(WebDriver driver) {
         super(driver);
+        this.receivePackingTrolleyPage = new ReceivePackingTrolleyPage(driver);
+        this.attachedDocumentModal = new AttachedDocumentModal(driver);
+        this.packagingMaterialHelper = new PackagingMaterialHelper(driver, attachedDocumentModal);
+        this.progressTracker = new PackingProgressTracker(driver, scanPickUpField);
+        this.productItemScanner = new ProductItemScanner(driver, packagingMaterialHelper, progressTracker,
+                attachedDocumentModal);
+    }
+
+
+    // --- Sub-component getters if caller needs direct access ---
+    public ReceivePackingTrolleyPage receiveTrolleyPage() {
+        return receivePackingTrolleyPage;
+    }
+
+    public AttachedDocumentModal attachedDocumentModal() {
+        return attachedDocumentModal;
+    }
+
+    public PackagingMaterialHelper materialHelper() {
+        return packagingMaterialHelper;
+    }
+
+    public PackingProgressTracker progressTracker() {
+        return progressTracker;
+    }
+
+    public ProductItemScanner productScanner() {
+        return productItemScanner;
+    }
+
+    // --- Delegated Trolley Reception ---
+    public void receivePackingTrolley(String pickupId) {
+        receivePackingTrolleyPage.receivePackingTrolley(pickupId);
     }
 
     public boolean verifyToastMessageIfPresent(String message, long timeoutMillis) {
-        try {
-            String text = shortWait(timeoutMillis)
-                    .until(driver -> {
-                        List<WebElement> toasts = driver.findElements(By.xpath("//div[contains(@class,'Toastify__toast-body')]//div[contains(normalize-space(.),'" + message + "')]"));
-                        for (WebElement toast : toasts) {
-                            try {
-                                if (toast.isDisplayed()) {
-                                    return toast.getText();
-                                }
-                            } catch (RuntimeException ignored) {
-                            }
-                        }
-                        return null;
-                    });
-            System.out.println("Toast: " + text);
-            return true;
-        } catch (RuntimeException ignored) {
-            System.out.println("Toast not found, continue: " + message);
-            return false;
-        }
+        return receivePackingTrolleyPage.verifyToastMessageIfPresent(message, timeoutMillis);
     }
 
-    public void receivePackingTrolley(String pickupId) {
-        driver.get(ConfigReader.required("WMS_BASE_URL") + "/receive-packing-trolley");
-        WebElement input = visible(scanPackingTrolleyField);
-        input.click();
-        input.sendKeys(pickupId, Keys.ENTER);
-        click(receivePackingTrolleyBtn);
-    }
-
+    // --- Table Scanning ---
     public void scanTablePacking(String tableCode) {
         scanTablePacking(tableCode, "/packing");
     }
@@ -97,76 +93,165 @@ public class PickAndPackOrderPage extends BasePage {
     }
 
     private void scanTablePacking(String tableCode, String packingPath) {
-        driver.get(ConfigReader.required("WMS_BASE_URL") + packingPath);
+        String targetUrl = ConfigReader.required("WMS_BASE_URL") + packingPath;
+        if (!driver.getCurrentUrl().contains(packingPath)) {
+            driver.get(targetUrl);
+        }
         new ScanTable(driver).scanIfPresent(tableCode);
         waitForScanPickupInput();
     }
 
+    // --- Basket / Pickup Scan ---
     public void scanPickUpOrder(String pickupId) {
-        closeBlockingModalIfPresent();
+        attachedDocumentModal.closeBlockingModalIfPresent();
         WebElement input = waitForScanPickupInput();
         try {
             clearAndEnter(input, pickupId);
         } catch (ElementClickInterceptedException error) {
-            closeBlockingModalIfPresent();
+            attachedDocumentModal.closeBlockingModalIfPresent();
             setInputValue(input, pickupId);
             input.sendKeys(Keys.ENTER);
         }
-        clickConfirmScanPickupButtonIfPresent();
+        if (!isPackingContextOpenNow()) {
+            clickConfirmScanPickupButtonIfPresent();
+        }
         waitForBasketScanToOpenPackingContext(pickupId);
-        System.out.println("Scanned pickup/basket code: " + pickupId);
+        Log.info("Scanned pickup/basket code: {}", pickupId);
     }
 
+    // --- Packing by System Suggestion (Single / SSO) ---
     public int packBySystemSuggestion(List<PackingOrder> packingOrders, String materialCode) {
         Set<String> visitedTrackingCodes = new HashSet<>();
         int packedOrderCount = 0;
-        for (PackingOrder order : packingOrders) {
-            if (isPackingCompleteNow()) {
-                break;
-            }
-            if (visitedTrackingCodes.contains(order.trackingCode())) {
-                continue;
-            }
+        int maxAttempts = Math.max(15, packingOrders.size() * 3);
+        int attempts = 0;
 
-            PickupItem firstScannable = firstScannableItem(order);
-            if (firstScannable == null) {
-                System.out.println("Skip " + order.trackingCode() + ": no scannable packing item by API data");
-                visitedTrackingCodes.add(order.trackingCode());
-                continue;
-            }
+        while (!progressTracker.isPackingCompleteNow() && visitedTrackingCodes.size() < packingOrders.size() && attempts < maxAttempts) {
+            attempts++;
+            boolean orderPackedInThisIteration = false;
 
-            String firstScanCode = getFirstItemScanCode(firstScannable);
-            System.out.println("Scan first product to let system suggest order: tracking="
-                    + order.trackingCode() + ", scanCode=" + firstScanCode);
-            if (!scanProductBarcode(firstScanCode)) {
-                if (isPackingCompleteNow()) {
+            for (PackingOrder order : packingOrders) {
+                if (progressTracker.isPackingCompleteNow()) {
                     break;
                 }
-                continue;
-            }
-            String currentTracking = openCurrentOrSuggestedOrder(order.trackingCode());
-            if (!visitedTrackingCodes.contains(currentTracking)) {
-                System.out.println("Packing suggested tracking: " + currentTracking);
+                if (visitedTrackingCodes.contains(order.trackingCode())) {
+                    continue;
+                }
+
+                PickupItem firstScannable = productItemScanner.firstScannableItem(order);
+                String firstScanCode = firstScannable != null ? productItemScanner.getFirstItemScanCode(firstScannable) : null;
+                String currentTracking = null;
+                String initiallyScannedCode = null;
+
+                // 1. Try scanning first product barcode to let system suggest order
+                if (firstScanCode != null) {
+                    Log.info("Scan first product to let system suggest order: tracking={}, scanCode={}",
+                            order.trackingCode(), firstScanCode);
+                    if (productItemScanner.scanProductBarcodeForSuggestion(firstScanCode)) {
+                        currentTracking = progressTracker.getNewPackingTrackingCodeIfPresent(visitedTrackingCodes, 2500);
+                        if (currentTracking != null) {
+                            initiallyScannedCode = firstScanCode;
+                        }
+                    }
+                }
+
+                // 2. If system suggestion didn't open a new unvisited order, open directly from details list
+                if (currentTracking == null) {
+                    Log.info("System suggestion did not open new order; opening from details list: tracking={}",
+                            order.trackingCode());
+                    currentTracking = openPackingOrderFromDetails(order.trackingCode());
+                    initiallyScannedCode = null;
+                    if (currentTracking == null && isTrackingAlreadyPackedInDetails(order.trackingCode())) {
+                        Log.info("Tracking is already packed according to details: {}", order.trackingCode());
+                        visitedTrackingCodes.add(order.trackingCode());
+                        attachedDocumentModal.closeBlockingModalIfPresent();
+                        continue;
+                    }
+                    attachedDocumentModal.closeBlockingModalIfPresent();
+                }
+
+                if (currentTracking == null) {
+                    Log.warn("Unable to open order: tracking={}, will retry", order.trackingCode());
+                    continue;
+                }
+
+                if (visitedTrackingCodes.contains(currentTracking)) {
+                    Log.info("Skip already processed tracking: {}", currentTracking);
+                    continue;
+                }
+
+                Log.info("Packing suggested tracking: {}", currentTracking);
                 PackingOrder suggestedOrder = requirePackingOrderByTrackingCode(packingOrders, currentTracking);
-                packCurrentSuggestedOrder(materialCode, suggestedOrder, firstScanCode);
+                productItemScanner.packCurrentSuggestedOrder(materialCode, suggestedOrder, initiallyScannedCode);
                 visitedTrackingCodes.add(currentTracking);
                 packedOrderCount++;
-            } else {
-                System.out.println("Skip already processed tracking: " + currentTracking);
+                orderPackedInThisIteration = true;
+                break;
+            }
+
+            if (!orderPackedInThisIteration && !progressTracker.isPackingCompleteNow()) {
+                Log.info("No order was packed in pass {}; checking progress and retrying...", attempts);
+                if (progressTracker.isPackingCompleteNow()) {
+                    break;
+                }
+                try {
+                    Thread.sleep(800);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             }
         }
         return packedOrderCount;
     }
 
+    // --- MSO Basket Packing ---
+    public String packOneOrderBySystemSuggestion(PackingOrder order, String materialCode) {
+        String currentTracking = progressTracker.getCurrentPackingTrackingCodeIfPresent(2000);
+        String initiallyScannedCode = null;
+
+        if (currentTracking == null) {
+            PickupItem firstScannable = productItemScanner.firstScannableItem(order);
+            if (firstScannable == null) {
+                Log.warn("Skip {}: no scannable packing item by API data", order.trackingCode());
+                return null;
+            }
+            String firstScanCode = productItemScanner.getFirstItemScanCode(firstScannable);
+            Log.info("Order not open yet; scan first product to open: tracking={}, scanCode={}",
+                    order.trackingCode(), firstScanCode);
+            productItemScanner.scanProductBarcode(firstScanCode);
+            currentTracking = openCurrentOrSuggestedOrder(order.trackingCode());
+            initiallyScannedCode = firstScanCode;
+        }
+
+        if (!order.trackingCode().equalsIgnoreCase(currentTracking)) {
+            currentTracking = openPackingOrderFromDetails(order.trackingCode());
+        }
+
+        if (!order.trackingCode().equalsIgnoreCase(currentTracking)) {
+            throw new IllegalStateException("Basket opened unexpected packing order. Expected tracking="
+                    + order.trackingCode()
+                    + ", actual tracking="
+                    + currentTracking
+                    + ", screen="
+                    + progressTracker.summarizeScreenText());
+        }
+
+        Log.info("Packing mapped basket tracking: {}", currentTracking);
+        productItemScanner.packCurrentSuggestedOrder(materialCode, order, initiallyScannedCode);
+        return currentTracking;
+    }
+
+
     public void assertAllOrdersPacked(String pickupId) {
-        PackingProgress progress = getPackingProgress(5000);
+        PackingProgressTracker.PackingProgress progress = progressTracker.getPackingProgress(5000);
         if (progress == null) {
             throw new IllegalStateException("Unable to read packing progress for pickup " + pickupId
                     + ". Screen="
-                    + summarizeScreenText());
+                    + progressTracker.summarizeScreenText());
         }
 
-        System.out.println("Packing progress: " + progress.packed() + "/" + progress.total());
+        Log.info("Packing progress: {}/{}", progress.packed(), progress.total());
         if (progress.packed() != progress.total()) {
             throw new IllegalStateException("Pickup " + pickupId
                     + " is not fully packed. packed="
@@ -174,623 +259,24 @@ public class PickAndPackOrderPage extends BasePage {
                     + "/"
                     + progress.total()
                     + ". Screen="
-                    + summarizeScreenText());
+                    + progressTracker.summarizeScreenText());
         }
     }
 
-    public String packNextBySystemSuggestion(
-            List<PackingOrder> packingOrders,
-            Set<String> visitedTrackingCodes,
-            String materialCode) {
-        for (PackingOrder order : packingOrders) {
-            if (visitedTrackingCodes.contains(order.trackingCode())) {
-                continue;
-            }
 
-            PickupItem firstScannable = firstScannableItem(order);
-            if (firstScannable == null) {
-                System.out.println("Skip " + order.trackingCode() + ": no scannable packing item by API data");
-                visitedTrackingCodes.add(order.trackingCode());
-                continue;
-            }
-
-            String firstScanCode = getFirstItemScanCode(firstScannable);
-            System.out.println("Scan first product to let system suggest order: tracking="
-                    + order.trackingCode() + ", scanCode=" + firstScanCode);
-            if (!scanProductBarcode(firstScanCode)) {
-                if (isPackingCompleteNow()) {
-                    return null;
-                }
-                continue;
-            }
-            String currentTracking = openCurrentOrSuggestedOrder(order.trackingCode());
-            if (visitedTrackingCodes.contains(currentTracking)) {
-                System.out.println("Skip already processed tracking: " + currentTracking);
-                continue;
-            }
-
-            System.out.println("Packing suggested tracking: " + currentTracking);
-            PackingOrder suggestedOrder = requirePackingOrderByTrackingCode(packingOrders, currentTracking);
-            packCurrentSuggestedOrder(materialCode, suggestedOrder, firstScanCode);
-            visitedTrackingCodes.add(currentTracking);
-            return currentTracking;
-        }
-        return null;
+    public boolean scanProductBarcodeForSuggestion(String barcode) {
+        return productItemScanner.scanProductBarcodeForSuggestion(barcode);
     }
 
-    public String packOneOrderBySystemSuggestion(PackingOrder order, String materialCode) {
-        PickupItem firstScannable = firstScannableItem(order);
-        if (firstScannable == null) {
-            System.out.println("Skip " + order.trackingCode() + ": no scannable packing item by API data");
-            return null;
-        }
-
-        String firstScanCode = getFirstItemScanCode(firstScannable);
-        System.out.println("Scan first product for mapped basket order: tracking="
-                + order.trackingCode() + ", scanCode=" + firstScanCode);
-        scanProductBarcode(firstScanCode);
-        String currentTracking = openCurrentOrSuggestedOrder(order.trackingCode());
-        if (!order.trackingCode().equals(currentTracking)) {
-            throw new IllegalStateException("Basket opened unexpected packing order. Expected tracking="
-                    + order.trackingCode()
-                    + ", actual tracking="
-                    + currentTracking
-                    + ", screen="
-                    + summarizeScreenText());
-        }
-
-        System.out.println("Packing mapped basket tracking: " + currentTracking);
-        packCurrentSuggestedOrder(materialCode, order, firstScanCode);
-        return currentTracking;
-    }
-
-    public void packOrdersByTrackingCode(List<PackingOrder> packingOrders, String materialCode) {
-        for (PackingOrder order : packingOrders) {
-            boolean scanned = false;
-            for (PickupItem item : order.items()) {
-                int quantityNeedScan = getQuantityNeedScan(item);
-                if (quantityNeedScan <= 0 || getFirstItemScanCode(item) == null) {
-                    continue;
-                }
-                for (int i = 0; i < quantityNeedScan; i++) {
-                    if (scanProductBarcode(getItemScanCode(item, i))) {
-                        scanned = true;
-                    } else {
-                        break;
-                    }
-                }
-            }
-            if (scanned) {
-                scanPackagingMaterial(materialCode);
-            }
-        }
-    }
-
-    private PickupItem firstScannableItem(PackingOrder order) {
-        for (PickupItem item : order.items()) {
-            if (item.quantitySold() > 0 && hasAvailableScanCode(item)) {
-                return item;
-            }
-        }
-        return null;
-    }
-
-    private boolean hasAvailableScanCode(PickupItem item) {
-        if (item.isSerialCode()) {
-            return item.serialCodes() != null && !item.serialCodes().isEmpty();
-        }
-        String barcode = getItemBarcode(item);
-        return barcode != null && !barcode.isBlank();
-    }
-
-    private void packCurrentSuggestedOrder(
-            String materialCode,
-            PackingOrder order,
-            String initiallyScannedCode) {
-        boolean initialScanAccounted = false;
-        for (PickupItem item : order.items()) {
-            int quantityToScan = getQuantityNeedScan(item);
-            if (quantityToScan <= 0 || getFirstItemScanCode(item) == null) {
-                continue;
-            }
-            int startIndex = 0;
-            if (!initialScanAccounted && hasScanCode(item, initiallyScannedCode)) {
-                startIndex = indexAfterScanCode(item, initiallyScannedCode);
-                quantityToScan = Math.max(0, quantityToScan - 1);
-                initialScanAccounted = true;
-                markSerialScanConfirmedIfNeeded(item, initiallyScannedCode);
-            }
-            for (int index = startIndex; index < startIndex + quantityToScan; index++) {
-                String scanCode = getItemScanCode(item, index);
-                if (isPackagingMaterialPromptVisibleNow() && !hasPendingUiItemsNow()) {
-                    break;
-                }
-                int pendingBefore = item.isSerialCode() ? totalPendingUiItemCount() : -1;
-                logSerialScanAttemptIfNeeded(item, scanCode);
-                if (!scanProductBarcode(scanCode)) {
-                    assertNoPendingUiItemsBeforeMaterial(order.trackingCode());
-                    break;
-                }
-                if (item.isSerialCode()) {
-                    waitForPendingUiCountToDecrease(pendingBefore, scanCode);
-                    markSerialScanConfirmedIfNeeded(item, scanCode);
-                }
-            }
-            if (isPackagingMaterialPromptVisibleNow() && !hasPendingUiItemsNow()) {
-                break;
-            }
-        }
-        scanRemainingUiItemsFromScreen(order);
-        assertNoPendingUiItemsBeforeMaterial(order.trackingCode());
-        PackingProgress progressBeforeMaterial = readPackingProgressNow();
-        scanPackagingMaterial(materialCode);
-        waitForPackingProgressToAdvance(order.trackingCode(), progressBeforeMaterial);
-    }
-
-    private void scanRemainingUiItemsFromScreen(PackingOrder order) {
-        for (int attempt = 1; attempt <= 100; attempt++) {
-            PackingUiItem pendingItem = firstPendingUiItem();
-            if (pendingItem == null) {
-                return;
-            }
-
-            PickupItem serialItem = serialItemForBarcode(order, pendingItem.barcode());
-            String scanCode = remainingUiScanCode(order, pendingItem, serialItem);
-            int pendingBefore = totalPendingUiItemCount();
-            System.out.println("Scan remaining UI product: tracking="
-                    + order.trackingCode()
-                    + ", barcode="
-                    + pendingItem.barcode()
-                    + (serialItem == null ? "" : ", serial=" + scanCode)
-                    + ", needScan="
-                    + pendingItem.needScan());
-            if (!scanProductBarcode(scanCode)) {
-                assertNoPendingUiItemsBeforeMaterial(order.trackingCode());
-                return;
-            }
-            waitForPendingUiCountToDecrease(pendingBefore, scanCode);
-            if (serialItem != null) {
-                lastScannedSerialByBarcode.put(pendingItem.barcode(), scanCode);
-                confirmedScannedSerialCodes.add(scanCode);
-            }
-        }
-        throw new IllegalStateException("Too many attempts while scanning remaining UI products. tracking="
-                + order.trackingCode()
-                + ", pending="
-                + pendingUiItemsSummary(pendingUiItemsNow()));
-    }
-
-    private String remainingUiScanCode(PackingOrder order, PackingUiItem pendingItem, PickupItem serialItem) {
-        if (serialItem == null) {
-            return pendingItem.barcode();
-        }
-
-        for (String serialCode : serialItem.serialCodes()) {
-            if (!confirmedScannedSerialCodes.contains(serialCode)) {
-                return serialCode;
-            }
-        }
-        throw new IllegalStateException("No remaining allocated serial available for pending serial product. tracking="
-                + order.trackingCode()
-                + ", barcode="
-                + pendingItem.barcode()
-                + ", pending="
-                + pendingItem.needScan()
-                + ", allocatedSerials="
-                + serialItem.serialCodes()
-                + ", confirmedSerials="
-                + confirmedScannedSerialCodes);
-    }
-
-    private PickupItem serialItemForBarcode(PackingOrder order, String barcode) {
-        for (PickupItem item : order.items()) {
-            if (item.isSerialCode() && barcode.equals(getItemBarcode(item))) {
-                return item;
-            }
-        }
-        return null;
-    }
-
-    private void logSerialScanAttemptIfNeeded(PickupItem item, String serialCode) {
-        if (!item.isSerialCode()) {
-            return;
-        }
-        System.out.println("Scan serial product: tracking="
-                + item.trackingCode()
-                + ", barcode="
-                + getItemBarcode(item)
-                + ", serial="
-                + serialCode);
-    }
-
-    private void markSerialScanConfirmedIfNeeded(PickupItem item, String serialCode) {
-        if (!item.isSerialCode()) {
-            return;
-        }
-        String itemBarcode = getItemBarcode(item);
-        if (itemBarcode != null && !itemBarcode.isBlank()) {
-            lastScannedSerialByBarcode.put(itemBarcode, serialCode);
-        }
-        confirmedScannedSerialCodes.add(serialCode);
-    }
-
-    private void assertNoPendingUiItemsBeforeMaterial(String trackingCode) {
-        List<PackingUiItem> pendingItems = pendingUiItemsNow();
-        if (!pendingItems.isEmpty()) {
-            throw new IllegalStateException("Packing order still has pending products before material scan. tracking="
-                    + trackingCode
-                    + ", pending="
-                    + pendingUiItemsSummary(pendingItems)
-                    + ", screen="
-                    + summarizeScreenText());
-        }
-    }
-
-    private List<PackingUiItem> pendingUiItemsNow() {
-        List<PackingUiItem> pendingItems = new ArrayList<>();
-        for (PackingUiItem item : getCurrentPackingItemsFromUi()) {
-            if (item.needScan() > 0) {
-                pendingItems.add(item);
-            }
-        }
-        return pendingItems;
-    }
-
-    private int totalPendingUiItemCount() {
-        int total = 0;
-        for (PackingUiItem item : getCurrentPackingItemsFromUi(false)) {
-            total += Math.max(0, item.needScan());
-        }
-        return total;
-    }
-
-    private void waitForPendingUiCountToDecrease(int previousPendingCount, String scanCode) {
-        try {
-            shortWait(3000).until(driver -> totalPendingUiItemCount() < previousPendingCount ? true : null);
-        } catch (RuntimeException error) {
-            throw new IllegalStateException("Pending UI quantity did not decrease after scanning " + scanCode
-                    + ". pendingBefore="
-                    + previousPendingCount
-                    + ", pendingAfter="
-                    + totalPendingUiItemCount()
-                    + ", screen="
-                    + summarizeScreenText(), error);
-        }
-    }
-
-    private String pendingUiItemsSummary(List<PackingUiItem> items) {
-        List<String> parts = new ArrayList<>();
-        for (PackingUiItem item : items) {
-            parts.add(item.barcode() + ":needScan=" + item.needScan());
-        }
-        return parts.toString();
-    }
-
-    private PackingOrder requirePackingOrderByTrackingCode(List<PackingOrder> packingOrders, String trackingCode) {
-        for (PackingOrder order : packingOrders) {
-            if (trackingCode.equals(order.trackingCode())) {
-                return order;
-            }
-        }
-        throw new IllegalStateException("Suggested packing order is not present in pickup API response. tracking="
-                + trackingCode
-                + ", screen="
-                + summarizeScreenText());
-    }
-
-    private PackingUiItem firstPendingUiItem() {
-        for (PackingUiItem item : getCurrentPackingItemsFromUi()) {
-            if (item.needScan() > 0) {
-                return item;
-            }
-        }
-        return null;
-    }
-
-    private List<PackingUiItem> getCurrentPackingItemsFromUi() {
-        return getCurrentPackingItemsFromUi(true);
-    }
-
-    private List<PackingUiItem> getCurrentPackingItemsFromUi(boolean logRows) {
-        List<WebElement> rows = wait.until(driver -> {
-            List<WebElement> elements = all(productRows);
-            return elements.isEmpty() ? null : elements;
-        });
-        List<PackingUiItem> items = new ArrayList<>();
-        for (WebElement row : rows) {
-            String rowText = row.getText();
-            String barcodeText = row.findElement(By.xpath(".//div[contains(@id,'barcode_')]")).getText();
-            String barcode = barcodeText == null ? "" : barcodeText.trim();
-            if (barcode.isBlank()) {
-                continue;
-            }
-            Matcher quantityMatcher = QUANTITY_PATTERN.matcher(rowText);
-            if (!quantityMatcher.find()) {
-                throw new IllegalStateException("Unable to read packing quantity from row: " + rowText);
-            }
-            String qtyText = quantityMatcher.group(0);
-            int packed = Integer.parseInt(quantityMatcher.group(1));
-            int total = Integer.parseInt(quantityMatcher.group(2));
-            items.add(new PackingUiItem(barcode, total - packed));
-            if (logRows) {
-                System.out.println("Packing UI row: barcode=" + barcode
-                        + ", qty=" + qtyText
-                        + ", needScan=" + (total - packed)
-                        + lastScannedSerialLog(barcode)
-                        + ", row=" + rowText.replaceAll("\\s+", " "));
-            }
-        }
-        return items;
-    }
-
-    private String lastScannedSerialLog(String barcode) {
-        String serial = lastScannedSerialByBarcode.get(barcode);
-        return serial == null || serial.isBlank() ? "" : ", lastScannedSerial=" + serial;
-    }
-
-    private PackingProgress getPackingProgress(long timeoutMillis) {
-        try {
-            return shortWait(timeoutMillis).until(driver -> readPackingProgressNow());
-        } catch (RuntimeException ignored) {
-            return null;
-        }
-    }
-
-    private boolean isPackingCompleteNow() {
-        PackingProgress progress = readPackingProgressNow();
-        return progress != null && progress.packed() == progress.total();
-    }
-
-    private void waitForPackingProgressToAdvance(String trackingCode, PackingProgress progressBeforeMaterial) {
-        if (progressBeforeMaterial == null) {
-            return;
-        }
-        try {
-            shortWait(8000).until(driver -> {
-                PackingProgress progress = readPackingProgressNow();
-                if (progress == null) {
-                    return null;
-                }
-                return progress.packed() > progressBeforeMaterial.packed()
-                        || progress.packed() == progress.total()
-                        ? true
-                        : null;
-            });
-        } catch (RuntimeException error) {
-            PackingProgress progress = readPackingProgressNow();
-            String currentProgress = progress == null
-                    ? "unknown"
-                    : progress.packed() + "/" + progress.total();
-            throw new IllegalStateException("Packing progress did not advance after material scan. tracking="
-                    + trackingCode
-                    + ", before="
-                    + progressBeforeMaterial.packed()
-                    + "/"
-                    + progressBeforeMaterial.total()
-                    + ", current="
-                    + currentProgress
-                    + ", screen="
-                    + summarizeScreenText(), error);
-        }
-    }
-
-    private PackingProgress readPackingProgressNow() {
-        String normalizedText = normalizeScanText(driver.findElement(By.tagName("body")).getText());
-        Matcher matcher = Pattern.compile("da dong goi\\s+(\\d+)\\s*/\\s*(\\d+)\\s+don")
-                .matcher(normalizedText);
-        if (!matcher.find()) {
-            return null;
-        }
-        return new PackingProgress(
-                Integer.parseInt(matcher.group(1)),
-                Integer.parseInt(matcher.group(2)));
-    }
-
-    private boolean scanProductBarcode(String barcode) {
-        WebElement input = findVisibleEnabled(scanSkuField, 1000);
-        if (input == null) {
-            if (isPackingCompleteNow() || isPackagingMaterialPromptVisibleNow() || !hasPendingUiItemsNow()) {
-                System.out.println("Product scan is complete; switch to material scan or stop.");
-                return false;
-            }
-            try {
-                input = wait.until(driver -> findVisibleEnabledNow(scanSkuField));
-            } catch (RuntimeException error) {
-                if (isPackingCompleteNow() || isPackagingMaterialPromptVisibleNow() || !hasPendingUiItemsNow()) {
-                    System.out.println("Product scan is complete; switch to material scan or stop.");
-                    return false;
-                }
-                throw new IllegalStateException("Product scan input is not available. barcode="
-                        + barcode
-                        + ", screen="
-                        + summarizeScreenText(), error);
-            }
-        }
-        try {
-            scanIntoProductInput(input, barcode);
-            return true;
-        } catch (RuntimeException error) {
-            if (isPackagingMaterialPromptVisibleNow() || !hasPendingUiItemsNow()) {
-                System.out.println("Product scan is complete; switch to material scan or stop.");
-                return false;
-            }
-            throw error;
-        }
-    }
-
-    private void scanIntoProductInput(WebElement input, String barcode) {
-        try {
-            clearAndEnter(input, barcode);
-        } catch (ElementClickInterceptedException e) {
-            setInputValue(input, barcode);
-            input.sendKeys(Keys.ENTER);
-        }
-    }
-
-    private void scanPackagingMaterial(String materialCode) {
-        scanOrClickPackagingMaterial(materialCode);
-        if (isCustomerPackingMaterialToastPresent()
-                && !CUSTOMER_PACKING_MATERIAL_FALLBACK_CODE.equalsIgnoreCase(materialCode)) {
-            System.out.println("Packing material " + materialCode
-                    + " is rejected because the order requires customer packing material. Retry with "
-                    + CUSTOMER_PACKING_MATERIAL_FALLBACK_CODE);
-            scanOrClickPackagingMaterial(CUSTOMER_PACKING_MATERIAL_FALLBACK_CODE);
-        }
-        confirmAttachedDocumentsPrintedIfPresent();
-    }
-
-    private void scanOrClickPackagingMaterial(String materialCode) {
-        WebElement input = findVisiblePackagingMaterialInput(2500);
-        if (input == null) {
-            clickFallbackPackagingMaterial(materialCode);
-            return;
-        }
-        clearAndEnter(input, materialCode);
-    }
-
-    private WebElement findVisiblePackagingMaterialInput(long timeoutMillis) {
-        try {
-            return shortWait(timeoutMillis).until(driver -> {
-                for (WebElement element : all(packagingMaterialsField)) {
-                    try {
-                        if (element.isDisplayed() && element.isEnabled()) {
-                            return element;
-                        }
-                    } catch (RuntimeException ignored) {
-                    }
-                }
-                return null;
-            });
-        } catch (RuntimeException ignored) {
-            return null;
-        }
-    }
-
-    private void clickFallbackPackagingMaterial(String materialCode) {
-        WebElement material = findVisible(By.xpath("//*[contains(normalize-space(.),'" + materialCode + "')]"), 1000);
-        if (material == null) {
-            material = visible(fallbackPackagingMaterial);
-        }
-        jsClick(material);
-    }
-
-    private boolean isCustomerPackingMaterialToastPresent() {
-        try {
-            return shortWait(CUSTOMER_MATERIAL_TOAST_TIMEOUT_MS).until(driver -> {
-                for (WebElement toast : driver.findElements(By.xpath("//div[contains(@class,'Toastify__toast-body')]"))) {
-                    try {
-                        if (!toast.isDisplayed()) {
-                            continue;
-                        }
-                        String normalizedText = normalizedToastText(toast.getText());
-                        if (normalizedText.contains("don hang yeu cau nvl dong goi cua khach hang")
-                                || (normalizedText.contains("nvl")
-                                && normalizedText.contains("dong goi")
-                                && normalizedText.contains("khach hang"))) {
-                            return true;
-                        }
-                    } catch (RuntimeException ignored) {
-                    }
-                }
-                return null;
-            });
-        } catch (RuntimeException ignored) {
-            return false;
-        }
-    }
-
-    private void confirmAttachedDocumentsPrintedIfPresent() {
-        WebElement confirmButton = findAttachedDocumentsPrintedConfirmButton(ATTACHED_DOCUMENT_CONFIRM_TIMEOUT_MS);
-        if (confirmButton == null) {
-            return;
-        }
-
-        jsClick(confirmButton);
-        System.out.println("Confirmed all attached documents were printed");
-        try {
-            shortWait(ATTACHED_DOCUMENT_CLOSE_TIMEOUT_MS)
-                    .until(driver -> !isAttachedDocumentsModalVisibleNow() ? true : null);
-        } catch (RuntimeException ignored) {
-            System.out.println("Attached documents modal is still visible after confirming printed documents");
-        }
-    }
-
-    private WebElement findAttachedDocumentsPrintedConfirmButton(long timeoutMillis) {
-        try {
-            return shortWait(timeoutMillis).until(driver -> findAttachedDocumentsPrintedConfirmButtonNow());
-        } catch (RuntimeException ignored) {
-            return null;
-        }
-    }
-
-    private WebElement findAttachedDocumentsPrintedConfirmButtonNow() {
-        for (WebElement modal : driver.findElements(visibleModal)) {
-            try {
-                if (!modal.isDisplayed() || !isAttachedDocumentsModal(modal)) {
-                    continue;
-                }
-                for (WebElement button : modal.findElements(By.cssSelector("button"))) {
-                    if (!button.isDisplayed() || !button.isEnabled()) {
-                        continue;
-                    }
-                    if (normalizeScanText(button.getText()).contains("xac nhan da in het")) {
-                        return button;
-                    }
-                }
-            } catch (RuntimeException ignored) {
-            }
-        }
-        return null;
-    }
-
-    private boolean isAttachedDocumentsModalVisibleNow() {
-        for (WebElement modal : driver.findElements(visibleModal)) {
-            try {
-                if (modal.isDisplayed() && isAttachedDocumentsModal(modal)) {
-                    return true;
-                }
-            } catch (RuntimeException ignored) {
-            }
-        }
-        return false;
-    }
-
-    private boolean isAttachedDocumentsModal(WebElement modal) {
-        String text = normalizeScanText(modal.getText());
-        return text.contains("danh sach tai lieu dinh kem")
-                || text.contains("vui long in tat ca cac tai lieu dinh kem");
-    }
-
-    private String normalizedToastText(String text) {
-        if (text == null) {
-            return "";
-        }
-        String withoutAccents = Normalizer.normalize(text, Normalizer.Form.NFD)
-                .replaceAll("\\p{M}", "");
-        return withoutAccents.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
-    }
-
-    private boolean hasPendingUiItemsNow() {
-        List<WebElement> rows = all(productRows);
-        if (rows.isEmpty()) {
+    // --- Private Context & Navigation Helpers ---
+    private boolean isPackingContextOpenNow() {
+        if (productItemScanner.isSkuInputVisibleNow()) {
             return true;
         }
-        for (WebElement row : rows) {
-            try {
-                Matcher quantityMatcher = QUANTITY_PATTERN.matcher(row.getText());
-                if (!quantityMatcher.find()) {
-                    return true;
-                }
-                int packed = Integer.parseInt(quantityMatcher.group(1));
-                int total = Integer.parseInt(quantityMatcher.group(2));
-                if (total - packed > 0) {
-                    return true;
-                }
-            } catch (RuntimeException ignored) {
-                return true;
-            }
+        if (progressTracker.getCurrentPackingTrackingCodeIfPresent(500) != null) {
+            return true;
         }
-        return false;
+        return productItemScanner.isProductRowsVisibleNow();
     }
 
     private void waitForBasketScanToOpenPackingContext(String pickupId) {
@@ -798,13 +284,13 @@ public class PickAndPackOrderPage extends BasePage {
             shortWait(3000).until(driver -> isPackingContextOpenNow() ? true : null);
             return;
         } catch (RuntimeException ignored) {
-            System.out.println("Packing context was not ready after scanning " + pickupId + "; retry scan once");
+            Log.info("Packing context was not ready after scanning {}; retry scan once", pickupId);
         }
 
         WebElement input = findScanPickupInput(2000);
         if (input == null) {
             throw new IllegalStateException("Packing context did not open after scanning " + pickupId
-                    + ", and pickup scan input is not available. Screen=" + summarizeScreenText());
+                    + ", and pickup scan input is not available. Screen=" + progressTracker.summarizeScreenText());
         }
         setInputValue(input, pickupId);
         input.sendKeys(Keys.ENTER);
@@ -816,7 +302,7 @@ public class PickAndPackOrderPage extends BasePage {
             if (confirmButton == null) {
                 throw new IllegalStateException("Packing context did not open after retrying pickup/basket scan "
                         + pickupId
-                        + ". Screen=" + summarizeScreenText(), error);
+                        + ". Screen=" + progressTracker.summarizeScreenText(), error);
             }
             jsClick(confirmButton);
             try {
@@ -824,7 +310,7 @@ public class PickAndPackOrderPage extends BasePage {
             } catch (RuntimeException retryError) {
                 throw new IllegalStateException("Packing context did not open after confirming pickup/basket scan "
                         + pickupId
-                        + ". Screen=" + summarizeScreenText(), retryError);
+                        + ". Screen=" + progressTracker.summarizeScreenText(), retryError);
             }
         }
     }
@@ -852,7 +338,7 @@ public class PickAndPackOrderPage extends BasePage {
                 if (!input.isDisplayed() || !input.isEnabled()) {
                     continue;
                 }
-                String placeholder = normalizeScanText(input.getAttribute("placeholder"));
+                String placeholder = progressTracker.normalizeScanText(input.getAttribute("placeholder"));
                 if (placeholder.contains("bang ke") || placeholder.contains("xe") || placeholder.contains("ro")) {
                     return input;
                 }
@@ -869,51 +355,8 @@ public class PickAndPackOrderPage extends BasePage {
         }
     }
 
-    private String normalizeScanText(String text) {
-        if (text == null) {
-            return "";
-        }
-        return Normalizer.normalize(text, Normalizer.Form.NFD)
-                .replaceAll("\\p{M}", "")
-                .replace('đ', 'd')
-                .replace('Đ', 'D')
-                .toLowerCase(Locale.ROOT)
-                .replaceAll("\\s+", " ")
-                .trim();
-    }
-
-    private boolean isPackingContextOpenNow() {
-        if (findVisibleEnabledNow(scanSkuField) != null) {
-            return true;
-        }
-        if (getVisibleElementTextNow(currentTrackingCode) != null) {
-            return true;
-        }
-        for (WebElement row : driver.findElements(productRows)) {
-            try {
-                if (row.isDisplayed()) {
-                    return true;
-                }
-            } catch (RuntimeException ignored) {
-            }
-        }
-        return false;
-    }
-
-    private boolean isPackagingMaterialPromptVisibleNow() {
-        for (WebElement element : driver.findElements(packagingMaterialsField)) {
-            try {
-                if (element.isDisplayed() && element.isEnabled()) {
-                    return true;
-                }
-            } catch (RuntimeException ignored) {
-            }
-        }
-        return false;
-    }
-
     private String openCurrentOrSuggestedOrder(String expectedTrackingCode) {
-        String currentTracking = getCurrentPackingTrackingCodeIfPresent(2500);
+        String currentTracking = progressTracker.getCurrentPackingTrackingCodeIfPresent(2500);
         if (currentTracking != null) {
             return currentTracking;
         }
@@ -926,7 +369,7 @@ public class PickAndPackOrderPage extends BasePage {
         throw new IllegalStateException("Unable to open packing order after scanning product. Expected tracking="
                 + expectedTrackingCode
                 + ", screen="
-                + summarizeScreenText());
+                + progressTracker.summarizeScreenText());
     }
 
     private String openPackingOrderFromDetails(String trackingCode) {
@@ -944,14 +387,36 @@ public class PickAndPackOrderPage extends BasePage {
         }
 
         jsClick(packingButton);
-        return getCurrentPackingTrackingCodeIfPresent(5000);
+        attachedDocumentModal.closeBlockingModalIfPresent();
+        try {
+            return shortWait(5000).until(driver -> {
+                String current = progressTracker.getCurrentPackingTrackingCodeIfPresent(500);
+                return trackingCode.equalsIgnoreCase(current) ? current : null;
+            });
+        } catch (RuntimeException ignored) {
+            return progressTracker.getCurrentPackingTrackingCodeIfPresent(2000);
+        }
+    }
+
+    private boolean isTrackingAlreadyPackedInDetails(String trackingCode) {
+        for (WebElement row : driver.findElements(By.xpath("//tr[contains(.,'" + trackingCode + "')]"))) {
+            try {
+                String text = progressTracker.normalizeScanText(row.getText());
+                if (text.contains("da dong goi") || text.contains("hoan thanh")) {
+                    return true;
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+        return false;
     }
 
     private WebElement findPackingButtonForTracking(String trackingCode, long timeoutMillis) {
         try {
             return shortWait(timeoutMillis).until(driver -> {
                 for (WebElement row : driver.findElements(By.xpath("//tr[contains(.,'" + trackingCode + "')]"))) {
-                    for (WebElement button : row.findElements(By.xpath(".//button[normalize-space()='Đóng gói' or normalize-space()='Dong goi']"))) {
+                    for (WebElement button : row.findElements(
+                            By.xpath(".//button[normalize-space()='Đóng gói' or normalize-space()='Dong goi']"))) {
                         try {
                             if (button.isDisplayed()
                                     && button.isEnabled()
@@ -967,6 +432,18 @@ public class PickAndPackOrderPage extends BasePage {
         } catch (RuntimeException ignored) {
             return null;
         }
+    }
+
+    private PackingOrder requirePackingOrderByTrackingCode(List<PackingOrder> packingOrders, String trackingCode) {
+        for (PackingOrder order : packingOrders) {
+            if (trackingCode.equals(order.trackingCode())) {
+                return order;
+            }
+        }
+        throw new IllegalStateException("Suggested packing order is not present in pickup API response. tracking="
+                + trackingCode
+                + ", screen="
+                + progressTracker.summarizeScreenText());
     }
 
     private WebElement findVisible(By locator, long timeoutMillis) {
@@ -987,47 +464,6 @@ public class PickAndPackOrderPage extends BasePage {
         }
     }
 
-    private void closeBlockingModalIfPresent() {
-        if (findVisible(visibleModal, 500) == null) {
-            return;
-        }
-
-        if (!clickVisibleModalCloseButton()) {
-            driver.findElement(By.tagName("body")).sendKeys(Keys.ESCAPE);
-        }
-
-        try {
-            shortWait(3000).until(driver -> driver.findElements(visibleModal).stream()
-                    .noneMatch(element -> {
-                        try {
-                            return element.isDisplayed();
-                        } catch (RuntimeException ignored) {
-                            return false;
-                        }
-                    }));
-        } catch (RuntimeException ignored) {
-            System.out.println("Modal still visible after close attempt; continue with input wait");
-        }
-    }
-
-    private boolean clickVisibleModalCloseButton() {
-        for (int attempt = 1; attempt <= 3; attempt++) {
-            WebElement closeButton = findVisible(visibleModalCloseButton, 1000);
-            if (closeButton == null) {
-                return false;
-            }
-            try {
-                jsClick(closeButton);
-                return true;
-            } catch (StaleElementReferenceException ignored) {
-                if (findVisible(visibleModal, 200) == null) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
     private WebElement findVisibleEnabled(By locator, long timeoutMillis) {
         try {
             return shortWait(timeoutMillis).until(driver -> findVisibleEnabledNow(locator));
@@ -1046,146 +482,5 @@ public class PickAndPackOrderPage extends BasePage {
             }
         }
         return null;
-    }
-
-    private String getVisibleElementTextNow(By locator) {
-        for (WebElement element : driver.findElements(locator)) {
-            try {
-                if (element.isDisplayed() && !element.getText().trim().isBlank()) {
-                    return element.getText().trim();
-                }
-            } catch (RuntimeException ignored) {
-            }
-        }
-        return null;
-    }
-
-    private String getCurrentPackingTrackingCodeIfPresent(long timeoutMillis) {
-        try {
-            return shortWait(timeoutMillis).until(driver -> {
-                for (WebElement element : driver.findElements(currentTrackingCode)) {
-                    try {
-                        if (element.isDisplayed() && !element.getText().trim().isBlank()) {
-                            String text = element.getText().trim();
-                            String trackingCode = extractCurrentTrackingCode(text);
-                            if (trackingCode != null) {
-                                return trackingCode;
-                            }
-                        }
-                    } catch (RuntimeException ignored) {
-                    }
-                }
-                return null;
-            });
-        } catch (RuntimeException ignored) {
-            return null;
-        }
-    }
-
-    private String extractCurrentTrackingCode(String text) {
-        if (text == null || text.isBlank()) {
-            return null;
-        }
-        Matcher matcher = Pattern.compile("(?i)(?:đơn hàng|don hang)\\s+([A-Z0-9][A-Z0-9-]+)").matcher(text);
-        return matcher.find() ? matcher.group(1) : null;
-    }
-
-    private String summarizeScreenText() {
-        String text = driver.findElement(By.tagName("body")).getText().replaceAll("\\s+", " ").trim();
-        return text.length() <= 600 ? text : text.substring(0, 600);
-    }
-
-    private String getFirstItemScanCode(PickupItem item) {
-        return getItemScanCode(item, 0);
-    }
-
-    private String getItemScanCode(PickupItem item, int index) {
-        if (item.isSerialCode()) {
-            if (item.serialCodes() == null || item.serialCodes().isEmpty()) {
-                throw new IllegalStateException("Serial item has no allocated serial code. tracking="
-                        + item.trackingCode()
-                        + ", partnerCode="
-                        + item.partnerCode()
-                        + ", goodsCode="
-                        + item.goodsCode());
-            }
-            if (index >= item.serialCodes().size()) {
-                throw new IllegalStateException("Not enough allocated serial codes for tracking="
-                        + item.trackingCode()
-                        + ", partnerCode="
-                        + item.partnerCode()
-                        + ", requestedIndex="
-                        + index
-                        + ", available="
-                        + item.serialCodes().size());
-            }
-            return item.serialCodes().get(index);
-        }
-        return getItemBarcode(item);
-    }
-
-    private boolean hasScanCode(PickupItem item, String scanCode) {
-        if (scanCode == null) {
-            return false;
-        }
-        if (item.isSerialCode()) {
-            return item.serialCodes() != null && item.serialCodes().contains(scanCode);
-        }
-        return scanCode.equals(getItemBarcode(item));
-    }
-
-    private int indexAfterScanCode(PickupItem item, String scanCode) {
-        if (!item.isSerialCode() || item.serialCodes() == null) {
-            return 0;
-        }
-        int index = item.serialCodes().indexOf(scanCode);
-        return index < 0 ? 0 : index + 1;
-    }
-
-    private String getItemBarcode(PickupItem item) {
-        if (item.barcodes() != null && !item.barcodes().isEmpty()) {
-            return item.barcodes().get(0);
-        }
-        return item.partnerCode();
-    }
-
-    private int getQuantityNeedScan(PickupItem item) {
-        return item.quantitySold() - item.quantityPick();
-    }
-
-    private static final class PackingProgress {
-        private final int packed;
-        private final int total;
-
-        private PackingProgress(int packed, int total) {
-            this.packed = packed;
-            this.total = total;
-        }
-
-        private int packed() {
-            return packed;
-        }
-
-        private int total() {
-            return total;
-        }
-    }
-
-    private static final class PackingUiItem {
-        private final String barcode;
-        private final int needScan;
-
-        private PackingUiItem(String barcode, int needScan) {
-            this.barcode = barcode;
-            this.needScan = needScan;
-        }
-
-        private String barcode() {
-            return barcode;
-        }
-
-        private int needScan() {
-            return needScan;
-        }
     }
 }

@@ -3,7 +3,8 @@ package com.example.seleniumtestng.flows;
 import com.example.seleniumtestng.config.ConfigReader;
 import com.example.seleniumtestng.models.InboundPackageData;
 import com.example.seleniumtestng.models.InboundProductData;
-import com.example.seleniumtestng.pages.CreateInboundProductPage;
+import com.example.seleniumtestng.pages.inbound.CreateInboundOmsPage;
+import com.example.seleniumtestng.utils.Log;
 import java.util.List;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.support.ui.ExpectedConditions;
@@ -21,8 +22,11 @@ public class InboundCreationFlow {
     }
 
     public String createApprovedInboundPackages(List<InboundPackageData> packages) {
-        driver.get(url("OMS", "/auth/login"));
-        AuthHelper.loginOms(driver);
+        String currentUrl = driver.getCurrentUrl();
+        if (currentUrl == null || !currentUrl.contains("onflow.vn") || currentUrl.contains("/login")) {
+            driver.get(url("OMS", "/auth/login"));
+            AuthHelper.loginOms(driver);
+        }
         new WebDriverWait(driver, ConfigReader.timeout()).until(ExpectedConditions.urlContains("/dashboard"));
 
         return createApprovedInboundPackagesFromCurrentSession(packages);
@@ -30,7 +34,7 @@ public class InboundCreationFlow {
 
     public String createApprovedInboundPackagesFromCurrentSession(List<InboundPackageData> packages) {
         driver.get(url("OMS", "/inbound/shipments?"));
-        CreateInboundProductPage createInbound = new CreateInboundProductPage(driver);
+        CreateInboundOmsPage createInbound = new CreateInboundOmsPage(driver);
         createInbound.openCreateInboundForm();
         createInbound.selectWarehouse(ConfigReader.required("INBOUND_WAREHOUSE_CODE"));
         createInbound.selectSupplier(ConfigReader.required("INBOUND_SUPPLIER"));
@@ -44,10 +48,11 @@ public class InboundCreationFlow {
         if (!inboundCode.matches("NHIV\\d+")) {
             throw new IllegalStateException("Invalid inbound code: " + inboundCode);
         }
+        Log.info("Created and approved OMS inbound PO: {}", inboundCode);
         return inboundCode;
     }
 
-    private void addInboundPackages(CreateInboundProductPage createInbound, List<InboundPackageData> packages) {
+    private void addInboundPackages(CreateInboundOmsPage createInbound, List<InboundPackageData> packages) {
         for (int packageIndex = 0; packageIndex < packages.size(); packageIndex++) {
             if (packageIndex > 0) {
                 createInbound.addPackageRow();
@@ -63,7 +68,7 @@ public class InboundCreationFlow {
         }
     }
 
-    private void addInboundProducts(CreateInboundProductPage createInbound, List<InboundProductData> products) {
+    private void addInboundProducts(CreateInboundOmsPage createInbound, List<InboundProductData> products) {
         for (int index = 0; index < products.size(); index++) {
             if (index > 0) {
                 createInbound.addNewProductRow();

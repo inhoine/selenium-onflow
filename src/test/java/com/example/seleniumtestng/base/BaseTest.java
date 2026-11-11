@@ -18,25 +18,32 @@ import org.testng.annotations.Parameters;
 public abstract class BaseTest {
     protected WebDriver driver;
 
+    public WebDriver getDriver() {
+        return DriverManager.hasDriver() ? DriverManager.getDriver() : this.driver;
+    }
+
     @BeforeMethod(alwaysRun = true)
     @Parameters("browser")
     public void setUp(@Optional("") String browser) {
-        driver = DriverFactory.create(browser);
+        WebDriver createdDriver = DriverFactory.create(browser);
+        DriverManager.setDriver(createdDriver);
+        this.driver = createdDriver;
     }
 
     @AfterMethod(alwaysRun = true)
     public void tearDown(ITestResult result) {
-        if (driver == null) {
+        WebDriver currentDriver = getDriver();
+        if (currentDriver == null) {
             return;
         }
         if (!result.isSuccess()) {
-            saveScreenshot(result.getMethod().getMethodName());
+            saveScreenshot(currentDriver, result.getMethod().getMethodName());
         }
         if (ConfigReader.getBoolean("KEEP_BROWSER_OPEN", false)) {
             return;
         }
-        driver.quit();
-        driver = null;
+        DriverManager.quitDriver();
+        this.driver = null;
     }
 
     protected String url(String app, String path) {
@@ -46,14 +53,18 @@ public abstract class BaseTest {
     }
 
     protected void saveScreenshot(String name) {
-        if (!(driver instanceof TakesScreenshot)) {
+        saveScreenshot(getDriver(), name);
+    }
+
+    protected void saveScreenshot(WebDriver targetDriver, String name) {
+        if (!(targetDriver instanceof TakesScreenshot)) {
             return;
         }
         try {
             Files.createDirectories(Path.of("screenshots"));
             String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
             Path target = Path.of("screenshots", name + "_" + timestamp + ".png");
-            byte[] bytes = ((TakesScreenshot) driver).getScreenshotAs(OutputType.BYTES);
+            byte[] bytes = ((TakesScreenshot) targetDriver).getScreenshotAs(OutputType.BYTES);
             Files.write(target, bytes);
         } catch (IOException | RuntimeException ignored) {
         }

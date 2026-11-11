@@ -1,9 +1,10 @@
-package com.example.seleniumtestng.pages;
+package com.example.seleniumtestng.pages.inbound;
 
+import com.example.seleniumtestng.pages.BasePage;
 import java.util.List;
-import java.util.stream.Collectors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.Keys;
@@ -11,7 +12,13 @@ import org.openqa.selenium.TimeoutException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 
-public class CreateInboundProductPage extends BasePage {
+/**
+ * Page object for creating and approving Inbound Purchase Orders (PO / Shipment) in OMS:
+ * - Warehouse and Supplier selection
+ * - Package and SKU configuration with dimensions
+ * - Submitting and approving POs, extracting generated NHIV codes
+ */
+public class CreateInboundOmsPage extends BasePage {
     private final By dropdownInboundBtn = By.xpath("//button[contains(.,'Tạo phiếu') or contains(.,'Tao phieu')]");
     private final By createInboundMenuItem = By.xpath("//button[contains(.,'Tạo phiếu nhập') or contains(.,'Tao phieu nhap')]");
     private final By warehouseField = By.xpath("//div[contains(.,'Chọn địa chỉ lấy hàng') or contains(.,'Chon dia chi lay hang')]/ancestor::div[contains(@class,'-control')]");
@@ -31,7 +38,7 @@ public class CreateInboundProductPage extends BasePage {
     private final By confirmInboundBtn = By.xpath("//button[normalize-space()='Tạo và duyệt phiếu nhập' or normalize-space()='Tao va duyet phieu nhap']");
     private final By inboundCodeText = By.xpath("//h5[contains(.,'Mã nhập kho') or contains(.,'Ma nhap kho')]");
 
-    public CreateInboundProductPage(WebDriver driver) {
+    public CreateInboundOmsPage(WebDriver driver) {
         super(driver);
     }
 
@@ -261,6 +268,7 @@ public class CreateInboundProductPage extends BasePage {
                                 + "  .replace(/đ/g, 'd').replace(/Đ/g, 'D')"
                                 + "  .toLowerCase().replace(/\\s+/g, ' ').trim();"
                                 + "const visible = el => {"
+                                + "  if (!el) return false;"
                                 + "  const style = window.getComputedStyle(el);"
                                 + "  const rect = el.getBoundingClientRect();"
                                 + "  return style.visibility !== 'hidden' && style.display !== 'none'"
@@ -408,3 +416,4 @@ public class CreateInboundProductPage extends BasePage {
         element.sendKeys(value);
     }
 }
+

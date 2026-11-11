@@ -12,6 +12,12 @@ import com.example.seleniumtestng.models.PickupDetail;
 import com.example.seleniumtestng.pages.PickAndPackOrderPage;
 import com.example.seleniumtestng.pages.PackingCampaignPage;
 import com.example.seleniumtestng.utils.AwbPdfVerifier;
+import com.example.seleniumtestng.utils.Log;
+import io.qameta.allure.Epic;
+import io.qameta.allure.Feature;
+import io.qameta.allure.Severity;
+import io.qameta.allure.SeverityLevel;
+import io.qameta.allure.Story;
 import java.util.ArrayList;
 import java.util.List;
 import org.openqa.selenium.JavascriptExecutor;
@@ -19,6 +25,8 @@ import org.testng.Assert;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
+@Epic("WMS - Đóng Gói")
+@Feature("Đóng Gói Chiến Dịch (Packing Campaign)")
 public class PackingCampaignTest extends BaseTest {
     private PackingCampaignPage packingCampaignPage;
     private String token;
@@ -33,7 +41,9 @@ public class PackingCampaignTest extends BaseTest {
         packingCampaignPage = new PackingCampaignPage(driver);
     }
 
-    @Test
+    @Test(description = "Verify WMS packing campaign pickup flow and AWB PDF verification")
+    @Story("Quét phiếu xuất Campaign, in vận đơn AWB và kiểm tra mã vạch PDF")
+    @Severity(SeverityLevel.CRITICAL)
     public void scanPackingCampaignPickup() {
         String tableCode = ConfigReader.getOrDefault(
                 "PACKING_CAMPAIGN_TABLE_CODE",
@@ -65,7 +75,8 @@ public class PackingCampaignTest extends BaseTest {
                 campaignAwbList,
                 orderAwbInfos(wmsApiClient, campaignAwbList, token));
         List<String> orderCodes = packingCampaignPage.waitForAllAwbBillsPrintedAndScanOrders();
-        Assert.assertFalse(orderCodes.isEmpty(), "Packing campaign should scan at least one order after AWB bill printed");
+        Assert.assertFalse(orderCodes.isEmpty(),
+                "Packing campaign should scan at least one order after AWB bill printed");
     }
 
     private List<OrderAwbInfo> orderAwbInfos(
@@ -85,7 +96,7 @@ public class PackingCampaignTest extends BaseTest {
 
     private void receivePackingTrolleyIfNeeded(String pickupCode, PickupDetail pickupDetail) {
         if (isBasketPickup(pickupDetail)) {
-            System.out.println("Skip receive packing trolley for basket pickup type: " + pickupDetail.pickupType());
+            Log.info("Skip receive packing trolley for basket pickup type: {}", pickupDetail.pickupType());
             return;
         }
 
@@ -106,7 +117,7 @@ public class PackingCampaignTest extends BaseTest {
         if (waitMillis <= 0) {
             return;
         }
-        System.out.println("Waiting " + waitMillis + "ms for manual browser permission allow");
+        Log.info("Waiting {}ms for manual browser permission allow", waitMillis);
         try {
             Thread.sleep(waitMillis);
         } catch (InterruptedException e) {

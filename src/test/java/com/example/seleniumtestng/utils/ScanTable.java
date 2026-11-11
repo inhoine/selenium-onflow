@@ -1,13 +1,17 @@
 package com.example.seleniumtestng.utils;
 
 import com.example.seleniumtestng.pages.BasePage;
+import com.example.seleniumtestng.utils.Log;
 import org.openqa.selenium.By;
 import org.openqa.selenium.Keys;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 
 public class ScanTable extends BasePage {
-    private final By tableInput = By.xpath("//input[@placeholder='Quét hoặc nhập mã bàn']");
+    private final By tableInput = By.xpath("//input[@id='packing-table-code'"
+            + " or contains(@placeholder,'mã bàn') or contains(@placeholder,'ma ban')"
+            + " or contains(@placeholder,'mã trạm') or contains(@placeholder,'ma tram')"
+            + " or contains(@placeholder,'bàn đóng gói')]");
     private final By visibleModal = By.cssSelector(".modal.show");
 
     public ScanTable(WebDriver driver) {
@@ -15,6 +19,7 @@ public class ScanTable extends BasePage {
     }
 
     public void scan(String tableCode) {
+        dismissPrinterModalIfPresent();
         WebElement input = wait.until(driver -> findTableOrStationInputNow());
         if (!scanIntoTableOrStationInput(input, tableCode)) {
             throw new IllegalStateException("Table/station scan modal did not close after scanning code: " + tableCode);
@@ -22,17 +27,19 @@ public class ScanTable extends BasePage {
     }
 
     public boolean scanIfPresent(String tableCode) {
+        dismissPrinterModalIfPresent();
         try {
             WebElement input = shortWait(800).until(driver -> findTableOrStationInputNow());
             if (!scanIntoTableOrStationInput(input, tableCode)) {
-                throw new IllegalStateException("Table/station scan modal did not close after scanning code: " + tableCode);
+                throw new IllegalStateException(
+                        "Table/station scan modal did not close after scanning code: " + tableCode);
             }
             return true;
         } catch (RuntimeException e) {
             if (isTableOrStationModalVisible()) {
                 throw e;
             }
-            System.out.println("Skip table scan because a packing table already appears to be selected");
+            Log.info("Skip table scan because a packing table already appears to be selected");
             return false;
         }
     }
@@ -72,36 +79,57 @@ public class ScanTable extends BasePage {
                 }
                 input.click();
                 input.sendKeys(Keys.chord(Keys.CONTROL, "a"), Keys.DELETE);
-                input.sendKeys(tableCode, Keys.ENTER);
-                if (waitForTableOrStationModalToClose()) {
-                    System.out.println("Scanned table/station code: " + tableCode);
-                    return true;
-                }
+                input.sendKeys(tableCode);
 
-                input = findTableOrStationInputNow();
-                if (input != null) {
-                    setInputValue(input, tableCode);
-                    input.sendKeys(Keys.ENTER);
-                    WebElement connectButton = findConnectTableOrStationButton(500);
-                    if (connectButton != null) {
+                WebElement connectButton = findConnectTableOrStationButton(1500);
+                if (connectButton != null) {
+                    try {
+                        connectButton.click();
+                    } catch (RuntimeException e) {
                         jsClick(connectButton);
                     }
-                    if (waitForTableOrStationModalToClose()) {
-                        System.out.println("Scanned table/station code: " + tableCode);
-                        return true;
-                    }
+                } else {
+                    input.sendKeys(Keys.ENTER);
+                }
+
+                if (waitForTableOrStationModalToClose()) {
+                    dismissPrinterModalIfPresent();
+                    Log.info("Scanned table/station code: {}", tableCode);
+                    return true;
                 }
             } catch (RuntimeException ignored) {
             }
         }
-        System.out.println("Table/station scan modal is still visible after scan attempt");
+        dismissPrinterModalIfPresent();
+        if (!isTableOrStationModalVisible()) {
+            return true;
+        }
+        Log.warn("Table/station scan modal is still visible after scan attempt: {}", tableCode);
         return false;
+    }
+
+    public void dismissPrinterModalIfPresent() {
+        try {
+            for (WebElement modal : driver.findElements(By.xpath(
+                    "//div[contains(@class,'modal') and contains(@class,'show') and (.//*[@aria-labelledby='qz-printer-error-title'] or contains(.,'Kết nối máy in') or contains(.,'Chưa thể kết nối'))]"))) {
+                for (WebElement btn : modal.findElements(By.xpath(
+                        ".//button[normalize-space()='Đóng' or contains(@class,'btn-close') or @aria-label='Close']"))) {
+                    if (btn.isDisplayed()) {
+                        jsClick(btn);
+                        Log.info("Dismissed printer connection modal");
+                        break;
+                    }
+                }
+            }
+        } catch (RuntimeException ignored) {
+        }
     }
 
     private WebElement findConnectTableOrStationButton(long timeoutMillis) {
         try {
             return shortWait(timeoutMillis).until(driver -> {
-                for (WebElement button : driver.findElements(By.cssSelector(".modal.show button, .modal.show [role='button']"))) {
+                for (WebElement button : driver
+                        .findElements(By.cssSelector(".modal.show button, .modal.show [role='button']"))) {
                     try {
                         if (!button.isDisplayed() || !button.isEnabled()) {
                             continue;
@@ -137,10 +165,10 @@ public class ScanTable extends BasePage {
                 String text = normalizeForMatch(modal.getText());
                 if (modal.isDisplayed()
                         && (text.contains("quet ma tram dong hang")
-                        || text.contains("ma tram dong hang")
-                        || text.contains("quet ma ban")
-                        || text.contains("ma ban kiem hang")
-                        || text.contains("ma ban"))) {
+                                || text.contains("ma tram dong hang")
+                                || text.contains("quet ma ban")
+                                || text.contains("ma ban kiem hang")
+                                || text.contains("ma ban"))) {
                     return true;
                 }
             } catch (RuntimeException ignored) {

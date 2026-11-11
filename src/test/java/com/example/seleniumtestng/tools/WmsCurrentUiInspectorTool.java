@@ -1,4 +1,4 @@
-package com.example.seleniumtestng.tests;
+package com.example.seleniumtestng.tools;
 
 import com.example.seleniumtestng.base.DriverFactory;
 import com.example.seleniumtestng.config.ConfigReader;
@@ -28,7 +28,7 @@ import org.openqa.selenium.support.ui.ExpectedCondition;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import org.testng.annotations.Test;
 
-public class WmsCurrentUiInspectorTest {
+public class WmsCurrentUiInspectorTool {
     private static final Duration LONG_WAIT = Duration.ofSeconds(18);
     private static final Duration SHORT_WAIT = Duration.ofSeconds(4);
     private static final Duration LOGIN_STEP_WAIT = Duration.ofSeconds(8);
@@ -932,7 +932,7 @@ public class WmsCurrentUiInspectorTest {
 
     private static boolean waitUntilLoggedIn(WebDriver driver) {
         try {
-            new WebDriverWait(driver, LOGIN_STEP_WAIT).until((ExpectedCondition<Boolean>) WmsCurrentUiInspectorTest::loggedIn);
+            new WebDriverWait(driver, LOGIN_STEP_WAIT).until((ExpectedCondition<Boolean>) WmsCurrentUiInspectorTool::loggedIn);
             return true;
         } catch (RuntimeException e) {
             return false;
@@ -1390,3 +1390,4 @@ public class WmsCurrentUiInspectorTest {
         }
     }
 }
+

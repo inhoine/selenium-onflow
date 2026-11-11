@@ -5,26 +5,39 @@ import com.example.seleniumtestng.clients.WmsApiClient;
 import com.example.seleniumtestng.config.ConfigReader;
 import com.example.seleniumtestng.flows.AuthHelper;
 import com.example.seleniumtestng.flows.InboundCreationFlow;
+import com.example.seleniumtestng.flows.InboundInspectionFlow;
+import com.example.seleniumtestng.flows.InboundInspectionFlow.InspectionSummary;
 import com.example.seleniumtestng.models.InboundPackageData;
 import com.example.seleniumtestng.models.InboundProductData;
-import com.example.seleniumtestng.models.POSku;
-import com.example.seleniumtestng.pages.InboundProductWmsPage;
-import com.example.seleniumtestng.pages.InboundProductWmsPage.ScannedInboundProduct;
-import com.example.seleniumtestng.utils.ScanTable;
+import com.example.seleniumtestng.utils.Log;
 import com.example.seleniumtestng.utils.TestDataReader;
-import java.text.Normalizer;
-import java.util.ArrayList;
+import io.qameta.allure.Epic;
+import io.qameta.allure.Feature;
+import io.qameta.allure.Severity;
+import io.qameta.allure.SeverityLevel;
+import io.qameta.allure.Step;
+import io.qameta.allure.Story;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
+/**
+ * Functional tests for Inbound Product workflows:
+ * - Happy path: Full PO creation (OMS) and inspection passes across boxes (WMS)
+ * - Negative validations: FIFO dimension/barcode, FEFO expiry dates, Serial
+ * missing/duplicates, Batch lot
+ */
+@Epic("WMS - Quản Lý Nhập Kho")
+@Feature("Kiểm Hàng Nhập PO (Inbound Inspection)")
 public class InboundProductTest extends BaseTest {
-    @Test
+
+    @Test(description = "Verify end-to-end inbound product creation in OMS and inspection in WMS", groups = { "inbound",
+            "smoke", "happy-path" })
+    @Story("Tạo PO và kiểm hàng thành công qua các kiện")
+    @Severity(SeverityLevel.BLOCKER)
     public void createAndInspectInboundProduct() {
+        Log.info("=== Bắt đầu kịch bản: Tạo PO và kiểm hàng End-to-End ===");
         boolean createNewInbound = ConfigReader.getBoolean("INBOUND_CREATE_NEW", true);
         List<InboundPackageData> inboundPackages = createNewInbound
                 ? TestDataReader.inboundPackages()
@@ -32,752 +45,215 @@ public class InboundProductTest extends BaseTest {
         List<InboundProductData> inboundProducts = createNewInbound
                 ? TestDataReader.flattenInboundProducts(inboundPackages)
                 : Collections.emptyList();
-        String inboundCode = createNewInbound
-                ? new InboundCreationFlow(driver).createApprovedInboundPackages(inboundPackages)
-                : ConfigReader.required("INBOUND_PO_CODE");
 
+        // 1. Chuẩn bị hoặc tạo mới PO trên OMS
+        String inboundCode = prepareInboundPoStep(createNewInbound, inboundPackages);
+
+        // 2. Đăng nhập WMS
+        String token = loginWmsStep();
+
+        // 3. Thực hiện kiểm hàng trên WMS
+        InboundInspectionFlow flow = new InboundInspectionFlow(driver);
+        InspectionSummary summary = executeInspectionStep(flow, inboundCode, token, inboundPackages, inboundProducts);
+
+        // 4. Xác thực kết quả kiểm hàng
+        validateInspectionSummaryStep(summary, inboundCode);
+
+        // 5. Cập nhật vị trí Putaway nếu được cấu hình
+        updatePutawayIfEnabledStep(inboundCode, token);
+    }
+
+    @Test(description = "Verify WMS inspection rejects invalid FIFO product cases", groups = { "inbound", "regression",
+            "negative", "fifo" })
+    @Story("Kiểm tra từ chối các trường hợp FIFO không hợp lệ (sai số lượng, barcode, kích thước)")
+    @Severity(SeverityLevel.NORMAL)
+    public void rejectInvalidFifoInboundInspectionCases() {
+        Log.info("=== Bắt đầu kịch bản: Kiểm tra Negative Case cho hàng FIFO ===");
+        String inboundCode = createSingleProductInboundStep("BIG_BUBBLE_069921", 1);
+        String token = loginWmsStep();
+
+        InboundInspectionFlow flow = new InboundInspectionFlow(driver);
+        verifyFifoNegativeCasesStep(flow, inboundCode, token);
+    }
+
+    @Test(description = "Verify FEFO inbound happy case then reject invalid expiry/manufacture dates", groups = {
+            "inbound", "regression", "fefo" })
+    @Story("Kiểm hàng FEFO thành công và từ chối NSX/HSD không hợp lệ")
+    @Severity(SeverityLevel.CRITICAL)
+    public void inspectFefoInboundHappyThenRejectInvalidDates() {
+        Log.info("=== Bắt đầu kịch bản: Kiểm hàng FEFO Happy Case & Negative Dates ===");
+        InboundCreationFlow inboundCreationFlow = new InboundCreationFlow(driver);
+        String happyInboundCode = createInboundPackagesStep(inboundCreationFlow,
+                InboundInspectionFlow.singleProductInboundPackages("FEFO-AT", 1), "FEFO-AT Happy");
+        String negativeInboundCode = createInboundPackagesCurrentSessionStep(inboundCreationFlow,
+                InboundInspectionFlow.singleProductInboundPackages("FEFO-AT", 1), "FEFO-AT Negative");
+
+        String token = loginWmsStep();
+        WmsApiClient wmsApiClient = new WmsApiClient();
+        InboundInspectionFlow flow = new InboundInspectionFlow(driver);
+
+        markReceivedStep(flow, wmsApiClient, happyInboundCode, token);
+        markReceivedStep(flow, wmsApiClient, negativeInboundCode, token);
+
+        inspectHappyCaseStep(flow, wmsApiClient, happyInboundCode, token, "FEFO");
+        verifyFefoNegativeCasesStep(flow, negativeInboundCode, token);
+    }
+
+    @Test(description = "Verify WMS inspection rejects invalid serial cases", groups = { "inbound", "regression",
+            "negative", "serial" })
+    @Story("Kiểm tra từ chối serial trùng lặp hoặc thiếu serial")
+    @Severity(SeverityLevel.CRITICAL)
+    public void rejectInvalidSerialInboundInspectionCases() {
+        Log.info("=== Bắt đầu kịch bản: Kiểm tra Negative Case cho hàng Serial ===");
+        String inboundCode = createSingleProductInboundStep("SERIAL-AT", 2);
+        String token = loginWmsStep();
+
+        InboundInspectionFlow flow = new InboundInspectionFlow(driver);
+        verifySerialNegativeCasesStep(flow, inboundCode, token);
+    }
+
+    @Test(description = "Verify WMS inspection rejects batch product without batch code", groups = { "inbound",
+            "regression", "negative", "batch" })
+    @Story("Kiểm tra từ chối hàng Batch khi thiếu mã Lô")
+    @Severity(SeverityLevel.NORMAL)
+    public void rejectBatchInboundInspectionWithoutBatchCode() {
+        Log.info("=== Bắt đầu kịch bản: Kiểm tra từ chối hàng Batch thiếu mã Lô ===");
+        String inboundCode = createSingleProductInboundStep("BATCH-AT", 1);
+        String token = loginWmsStep();
+
+        InboundInspectionFlow flow = new InboundInspectionFlow(driver);
+        verifyMissingBatchLotRejectedStep(flow, inboundCode, token);
+    }
+
+    @Test(description = "Verify WMS inspection happy case for batch product", groups = { "inbound", "regression",
+            "happy-path", "batch" })
+    @Story("Kiểm hàng thành công cho sản phẩm quản lý theo Batch")
+    @Severity(SeverityLevel.CRITICAL)
+    public void inspectBatchInboundHappyCase() {
+        Log.info("=== Bắt đầu kịch bản: Kiểm hàng thành công cho hàng Batch ===");
+        String inboundCode = createSingleProductInboundStep("BATCH-AT", 1);
+        String token = loginWmsStep();
+        WmsApiClient wmsApiClient = new WmsApiClient();
+
+        InboundInspectionFlow flow = new InboundInspectionFlow(driver);
+        markReceivedStep(flow, wmsApiClient, inboundCode, token);
+        inspectHappyCaseStep(flow, wmsApiClient, inboundCode, token, "Batch");
+    }
+
+    // ==========================================
+    // ALLURE STEP DECOMPOSITION HELPERS
+    // ==========================================
+
+    @Step("1. Chuẩn bị đơn PO nhập kho (Tạo mới hoặc lấy sẵn)")
+    private String prepareInboundPoStep(boolean createNew, List<InboundPackageData> packages) {
+        if (createNew) {
+            Log.info("Khởi tạo đơn PO mới trên OMS với {} kiện...", packages.size());
+            String code = new InboundCreationFlow(driver).createApprovedInboundPackages(packages);
+            Log.info("Đã tạo thành công PO mới: {}", code);
+            return code;
+        }
+        String existingCode = ConfigReader.required("INBOUND_PO_CODE");
+        Log.info("Sử dụng mã PO sẵn có từ cấu hình: {}", existingCode);
+        return existingCode;
+    }
+
+    @Step("2. Đăng nhập WMS và lấy token xác thực")
+    private String loginWmsStep() {
         driver.get(url("WMS", "/login"));
         String token = AuthHelper.loginWms(driver);
+        Assert.assertNotNull(token, "Token đăng nhập WMS không được null");
+        Assert.assertFalse(token.isBlank(), "Token đăng nhập WMS không được rỗng");
+        return token;
+    }
 
-        WmsApiClient wmsApiClient = new WmsApiClient();
-        markReceivedIfAllowed(wmsApiClient, inboundCode, token);
+    @Step("3. Thực hiện quy trình kiểm hàng trên WMS cho PO {inboundCode}")
+    private InspectionSummary executeInspectionStep(InboundInspectionFlow flow, String inboundCode, String token,
+            List<InboundPackageData> packages, List<InboundProductData> products) {
+        return flow.executeInspection(inboundCode, token, packages, products);
+    }
 
-        int inspectionLimit = Integer.parseInt(ConfigReader.getOrDefault("INBOUND_INSPECTION_LIMIT", "1"));
-        List<String> boxCodes = boxCodesToInspect(wmsApiClient, inboundCode, token, inspectionLimit);
-        if (boxCodes.isEmpty()) {
-            System.out.println("No pending PO boxes to inspect for " + inboundCode + "; inbound inspection is already complete");
+    @Step("4. Xác thực kết quả kiểm hàng PO {inboundCode}")
+    private void validateInspectionSummaryStep(InspectionSummary summary, String inboundCode) {
+        if (summary.inspectedProducts() == 0 && summary.remainingBoxes().isEmpty()) {
+            Log.info("Không còn kiện nào cần kiểm cho PO {}; quá trình kiểm hàng đã hoàn tất trước đó.", inboundCode);
             return;
         }
-        System.out.println("Read PO boxes from API: " + boxCodes.size());
 
-        int inspectedProducts = 0;
-        int skippedProducts = 0;
-        InboundProductWmsPage inboundWms = null;
-        int fullInspectionPass = 1;
-        int maxFullInspectionPasses = Integer.parseInt(ConfigReader.getOrDefault("INBOUND_FULL_MAX_PASSES", "5"));
+        Log.info("Kết quả kiểm hàng: inspected={}, skipped={}", summary.inspectedProducts(), summary.skippedProducts());
 
-        while (!boxCodes.isEmpty()) {
-            int inspectedBeforePass = inspectedProducts;
-            int skippedBeforePass = skippedProducts;
-            System.out.println("Inbound inspection pass: pass="
-                    + fullInspectionPass
-                    + ", boxes="
-                    + summarizeBoxCodes(boxCodes));
-
-            inboundWms = openInspectionAndScanPo(inboundCode);
-
-            for (String boxCode : boxCodes) {
-                Map<String, POSku> boxProductMetadata = productMetadataForBox(
-                        wmsApiClient,
-                        inboundCode,
-                        boxCode,
-                        token);
-
-                int inspectedBeforeBox = inspectedProducts;
-                int skippedBeforeBox = skippedProducts;
-                while (inspectionLimit <= 0 || inspectedProducts < inspectionLimit) {
-                    BoxInspectionResult result = scanBoxAndInspectNextProduct(
-                            inboundWms,
-                            boxCode,
-                            boxProductMetadata,
-                            inboundPackages,
-                            inboundProducts);
-                    inspectedProducts += result.inspectedProducts;
-                    skippedProducts += result.skippedProducts;
-                    if (!result.shouldContinueBox) {
-                        break;
-                    }
-                    if (inspectionLimit > 0 && inspectedProducts >= inspectionLimit) {
-                        break;
-                    }
-                }
-                System.out.println("Inbound box summary: box="
-                        + boxCode
-                        + ", inspected_box=" + (inspectedProducts - inspectedBeforeBox)
-                        + ", skipped_box=" + (skippedProducts - skippedBeforeBox)
-                        + ", inspected_total=" + inspectedProducts
-                        + ", skipped_total=" + skippedProducts);
-                if (inspectionLimit > 0 && inspectedProducts >= inspectionLimit) {
-                    break;
-                }
-            }
-
-            if (inspectionLimit > 0) {
-                break;
-            }
-            boxCodes = wmsApiClient.getPendingPoBoxes(inboundCode, token);
-            if (boxCodes.isEmpty()) {
-                break;
-            }
-            if (fullInspectionPass >= maxFullInspectionPasses) {
-                System.out.println("Stop full inspection because max passes reached: " + maxFullInspectionPasses);
-                break;
-            }
-            if (inspectedProducts == inspectedBeforePass && skippedProducts == skippedBeforePass) {
-                System.out.println("Stop full inspection because pending boxes made no progress: " + boxCodes);
-                break;
-            }
-            fullInspectionPass++;
-        }
-        System.out.println("Inbound inspection summary: inspected=" + inspectedProducts + ", skipped=" + skippedProducts);
-        if (inspectionLimit > 0) {
+        if (summary.inspectionLimit() > 0) {
             Assert.assertTrue(
-                    inspectedProducts >= inspectionLimit,
-                    "Inbound inspection stopped before reaching limit. inspected="
-                            + inspectedProducts
-                            + ", limit="
-                            + inspectionLimit
-                            + ", skipped="
-                            + skippedProducts);
+                    summary.inspectedProducts() >= summary.inspectionLimit(),
+                    "Số lượng SKU kiểm hàng dừng lại trước khi đạt hạn mức: inspected="
+                            + summary.inspectedProducts() + ", limit=" + summary.inspectionLimit());
         } else {
-            if (inboundWms != null && inboundWms.finishInspectionSessionIfPresent()) {
-                System.out.println("Finished inbound inspection session for " + inboundCode);
-            }
-            List<String> remainingBoxCodes = waitForRemainingBoxesAfterInspection(wmsApiClient, inboundCode, token);
             Assert.assertTrue(
-                    remainingBoxCodes.isEmpty(),
-                    "Inbound inspection stopped while PO still has pending boxes. inspected="
-                            + inspectedProducts
-                            + ", skipped="
-                            + skippedProducts
-                            + ", remaining_boxes="
-                            + remainingBoxCodes);
+                    summary.remainingBoxes().isEmpty(),
+                    "Vẫn còn kiện chưa được kiểm hàng xong: remaining=" + summary.remainingBoxes());
         }
-        Assert.assertTrue(inspectedProducts > 0, "No SKU was inspected for " + inboundCode);
+        Assert.assertTrue(summary.inspectedProducts() > 0, "Không có SKU nào được kiểm hàng cho PO " + inboundCode);
+    }
 
-        if (Boolean.parseBoolean(ConfigReader.getOrDefault("INBOUND_UPDATE_PUTAWAY", "false"))) {
-            int putawayTasksUpdated = wmsApiClient.updatePutaway(inboundCode, token);
-            Assert.assertTrue(putawayTasksUpdated > 0, "No putaway task updated for " + inboundCode);
+    @Step("5. Cập nhật vị trí lưu kho Putaway cho PO {inboundCode}")
+    private void updatePutawayIfEnabledStep(String inboundCode, String token) {
+        if (!Boolean.parseBoolean(ConfigReader.getOrDefault("INBOUND_UPDATE_PUTAWAY", "false"))) {
+            Log.info("Bỏ qua bước Putaway do INBOUND_UPDATE_PUTAWAY=false");
+            return;
         }
-    }
-
-    @Test
-    public void rejectInvalidFifoInboundInspectionCases() {
-        InboundCreationFlow inboundCreationFlow = new InboundCreationFlow(driver);
-        String inboundCode = inboundCreationFlow.createApprovedInboundPackages(
-                singleProductInboundPackages("AT-FAILED", 1));
-
-        driver.get(url("WMS", "/login"));
-        String token = AuthHelper.loginWms(driver);
         WmsApiClient wmsApiClient = new WmsApiClient();
-
-        markReceivedIfAllowed(wmsApiClient, inboundCode, token);
-
-        List<String> boxCodes = boxCodesToInspect(wmsApiClient, inboundCode, token, 1);
-        Assert.assertFalse(boxCodes.isEmpty(), "No pending PO boxes to inspect for " + inboundCode);
-        String boxCode = boxCodes.get(0);
-
-        InboundProductWmsPage inboundWms = openInspectionAndScanPo(inboundCode);
-        inboundWms.scanBoxIfNeeded(boxCode);
-        ScannedInboundProduct scannedProduct = inboundWms.openFirstInspectableProduct(boxCode);
-        Assert.assertNotNull(scannedProduct, "No inspectable FIFO product found in box " + boxCode);
-
-        POSku product = productForInspection(scannedProduct, Collections.emptyMap());
-        String validBarcode = inboundWms.readBarcodeFromProductModal();
-        for (FifoNegativeCase negativeCase : FifoNegativeCase.values()) {
-            inputNegativeInspectionData(inboundWms, product, negativeCase, validBarcode);
-            String validationText = inboundWms.submitInspectExpectingValidation();
-            assertFifoValidationMessage(negativeCase, validationText);
-
-            System.out.println("FIFO negative inspection blocked as expected: case="
-                    + negativeCase
-                    + ", po="
-                    + inboundCode
-                    + ", validation="
-                    + validationText);
-            Assert.assertTrue(
-                    wmsApiClient.getPendingPoBoxes(inboundCode, token).contains(boxCode),
-                    "Invalid FIFO inspection should not complete box " + boxCode + " for case " + negativeCase);
-        }
+        int putawayTasksUpdated = wmsApiClient.updatePutaway(inboundCode, token);
+        Assert.assertTrue(putawayTasksUpdated > 0, "Không có task Putaway nào được cập nhật cho PO " + inboundCode);
+        Log.info("Cập nhật thành công {} task Putaway cho PO {}", putawayTasksUpdated, inboundCode);
     }
 
-    @Test
-    public void inspectFefoInboundHappyThenRejectInvalidDates() {
+    @Step("Tạo đơn PO nhập kho trên OMS cho SKU: {sku} (Số lượng: {quantity})")
+    private String createSingleProductInboundStep(String sku, int quantity) {
         InboundCreationFlow inboundCreationFlow = new InboundCreationFlow(driver);
-        String happyInboundCode = inboundCreationFlow.createApprovedInboundPackages(
-                singleProductInboundPackages("FEFO-AT", 1));
-        String negativeInboundCode = inboundCreationFlow.createApprovedInboundPackagesFromCurrentSession(
-                singleProductInboundPackages("FEFO-AT", 1));
-
-        driver.get(url("WMS", "/login"));
-        String token = AuthHelper.loginWms(driver);
-        WmsApiClient wmsApiClient = new WmsApiClient();
-
-        markReceivedIfAllowed(wmsApiClient, happyInboundCode, token);
-        markReceivedIfAllowed(wmsApiClient, negativeInboundCode, token);
-
-        inspectSingleProductHappyCase(wmsApiClient, happyInboundCode, token);
-
-        OpenedInboundProduct openedProduct = openFirstProductForInspection(wmsApiClient, negativeInboundCode, token);
-        String validBarcode = openedProduct.page.readBarcodeFromProductModal();
-        for (FefoNegativeCase negativeCase : FefoNegativeCase.values()) {
-            inputFefoNegativeInspectionData(openedProduct.page, openedProduct.product, negativeCase, validBarcode);
-            String validationText = openedProduct.page.submitInspectExpectingValidation();
-            assertFefoValidationMessage(negativeCase, validationText);
-
-            System.out.println("FEFO negative inspection blocked as expected: case="
-                    + negativeCase
-                    + ", po="
-                    + negativeInboundCode
-                    + ", validation="
-                    + validationText);
-            Assert.assertTrue(
-                    wmsApiClient.getPendingPoBoxes(negativeInboundCode, token).contains(openedProduct.boxCode),
-                    "Invalid FEFO inspection should not complete box "
-                            + openedProduct.boxCode
-                            + " for case "
-                            + negativeCase);
-        }
+        return inboundCreationFlow.createApprovedInboundPackages(
+                InboundInspectionFlow.singleProductInboundPackages(sku, quantity));
     }
 
-    @Test
-    public void rejectInvalidSerialInboundInspectionCases() {
-        InboundCreationFlow inboundCreationFlow = new InboundCreationFlow(driver);
-        String inboundCode = inboundCreationFlow.createApprovedInboundPackages(
-                singleProductInboundPackages("SERIAL-AT", 2));
-
-        driver.get(url("WMS", "/login"));
-        String token = AuthHelper.loginWms(driver);
-        WmsApiClient wmsApiClient = new WmsApiClient();
-
-        markReceivedIfAllowed(wmsApiClient, inboundCode, token);
-
-        for (SerialNegativeCase negativeCase : SerialNegativeCase.values()) {
-            OpenedInboundProduct openedProduct = openFirstProductForInspection(wmsApiClient, inboundCode, token);
-            String validBarcode = openedProduct.page.readBarcodeFromProductModal();
-            inputSerialNegativeInspectionData(openedProduct.page, openedProduct.product, negativeCase, validBarcode);
-            String validationText = submitSerialNegativeInspection(openedProduct.page);
-            assertSerialValidationMessage(negativeCase, validationText);
-
-            System.out.println("SERIAL negative inspection blocked as expected: case="
-                    + negativeCase
-                    + ", po="
-                    + inboundCode
-                    + ", validation="
-                    + validationText);
-            Assert.assertTrue(
-                    wmsApiClient.getPendingPoBoxes(inboundCode, token).contains(openedProduct.boxCode),
-                    "Invalid SERIAL inspection should not complete box "
-                            + openedProduct.boxCode
-                            + " for case "
-                            + negativeCase);
-        }
+    @Step("Tạo đơn PO nhập kho trên OMS: {description}")
+    private String createInboundPackagesStep(InboundCreationFlow flow, List<InboundPackageData> packages,
+            String description) {
+        return flow.createApprovedInboundPackages(packages);
     }
 
-    @Test
-    public void rejectBatchInboundInspectionWithoutBatchCode() {
-        InboundCreationFlow inboundCreationFlow = new InboundCreationFlow(driver);
-        String inboundCode = inboundCreationFlow.createApprovedInboundPackages(
-                singleProductInboundPackages("BATCH-AT", 1));
-
-        driver.get(url("WMS", "/login"));
-        String token = AuthHelper.loginWms(driver);
-        WmsApiClient wmsApiClient = new WmsApiClient();
-
-        markReceivedIfAllowed(wmsApiClient, inboundCode, token);
-
-        OpenedInboundProduct openedProduct = openFirstProductForInspection(wmsApiClient, inboundCode, token);
-        String validBarcode = openedProduct.page.readBarcodeFromProductModal();
-        inputValidInspectionData(openedProduct.page, openedProduct.product, validBarcode);
-        openedProduct.page.clearBatchLotIfPresent();
-        String validationText = openedProduct.page.submitInspectExpectingValidation();
-        assertValidationContainsAny("BATCH MISSING_BATCH", validationText, "batch");
-
-        System.out.println("BATCH negative inspection blocked as expected: case=MISSING_BATCH, po="
-                + inboundCode
-                + ", validation="
-                + validationText);
-        Assert.assertTrue(
-                wmsApiClient.getPendingPoBoxes(inboundCode, token).contains(openedProduct.boxCode),
-                "Invalid BATCH inspection should not complete box " + openedProduct.boxCode);
+    @Step("Tạo đơn PO nhập kho từ phiên hiện tại: {description}")
+    private String createInboundPackagesCurrentSessionStep(InboundCreationFlow flow, List<InboundPackageData> packages,
+            String description) {
+        return flow.createApprovedInboundPackagesFromCurrentSession(packages);
     }
 
-    @Test
-    public void inspectBatchInboundHappyCase() {
-        InboundCreationFlow inboundCreationFlow = new InboundCreationFlow(driver);
-        String inboundCode = inboundCreationFlow.createApprovedInboundPackages(
-                singleProductInboundPackages("BATCH-AT", 1));
-
-        driver.get(url("WMS", "/login"));
-        String token = AuthHelper.loginWms(driver);
-        WmsApiClient wmsApiClient = new WmsApiClient();
-
-        markReceivedIfAllowed(wmsApiClient, inboundCode, token);
-        inspectSingleProductHappyCase(wmsApiClient, inboundCode, token);
-    }
-
-    private List<String> waitForRemainingBoxesAfterInspection(
-            WmsApiClient wmsApiClient,
-            String inboundCode,
+    @Step("Xác nhận đã nhận hàng vào kho cho PO {inboundCode}")
+    private void markReceivedStep(InboundInspectionFlow flow, WmsApiClient apiClient, String inboundCode,
             String token) {
-        List<String> remainingBoxCodes = new ArrayList<>();
-        long deadline = System.currentTimeMillis() + 5000;
-        while (System.currentTimeMillis() <= deadline) {
-            remainingBoxCodes = wmsApiClient.getPendingPoBoxes(inboundCode, token);
-            if (remainingBoxCodes.isEmpty()) {
-                return remainingBoxCodes;
-            }
-            if (!sleepBriefly(250)) {
-                return remainingBoxCodes;
-            }
-        }
-        return remainingBoxCodes;
+        flow.markReceivedIfAllowed(apiClient, inboundCode, token);
     }
 
-    private boolean sleepBriefly(long millis) {
-        try {
-            Thread.sleep(millis);
-            return true;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
-        }
+    @Step("Kiểm hàng thành công cho đơn {type} PO: {inboundCode}")
+    private void inspectHappyCaseStep(InboundInspectionFlow flow, WmsApiClient apiClient, String inboundCode,
+            String token, String type) {
+        flow.inspectSingleProductHappyCase(apiClient, inboundCode, token);
     }
 
-    private InboundProductWmsPage openInspectionAndScanPo(String inboundCode) {
-        driver.get(url("WMS", "/inspection"));
-        new ScanTable(driver).scanIfPresent(ConfigReader.required("INBOUND_PACKING_TABLE_CODE"));
-        InboundProductWmsPage inboundWms = new InboundProductWmsPage(driver);
-        inboundWms.scanPo(inboundCode);
-        return inboundWms;
+    @Step("Kiểm tra từ chối các trường hợp sai lệch FIFO cho PO {inboundCode}")
+    private void verifyFifoNegativeCasesStep(InboundInspectionFlow flow, String inboundCode, String token) {
+        flow.verifyFifoNegativeCases(inboundCode, token);
     }
 
-    private BoxInspectionResult scanBoxAndInspectNextProduct(
-            InboundProductWmsPage inboundWms,
-            String boxCode,
-            Map<String, POSku> productMetadata,
-            List<InboundPackageData> inboundPackages,
-            List<InboundProductData> inboundProducts) {
-        inboundWms.scanBoxIfNeeded(boxCode);
-        List<ScannedInboundProduct> visibleProducts = inboundWms.scannedProductsIfPresent(boxCode);
-        if (Boolean.parseBoolean(ConfigReader.getOrDefault("INBOUND_ASSERT_TESTDATA", "false"))) {
-            assertScannedProductsReadable(visibleProducts, boxCode);
-            assertInboundProductsVisible(
-                    expectedProductsForBox(inboundPackages, boxCode, inboundProducts),
-                    visibleProducts,
-                    boxCode);
-        }
-
-        ScannedInboundProduct scannedProduct = inboundWms.openFirstInspectableProduct(boxCode);
-        if (scannedProduct == null) {
-            System.out.println("Box has no actionable product on current screen: box="
-                    + boxCode
-                    + ", reason=" + inboundWms.lastInspectOpenFailure());
-            return BoxInspectionResult.stop(0);
-        }
-
-        inspectOpenedProduct(inboundWms, productForInspection(scannedProduct, productMetadata));
-        if (productMetadata.size() == 1 || visibleProducts.size() == 1) {
-            return BoxInspectionResult.stopAfterInspect(1, 0);
-        }
-        return BoxInspectionResult.continueBox(1, 0);
+    @Step("Kiểm tra từ chối các trường hợp NSX/HSD không hợp lệ (FEFO) cho PO {inboundCode}")
+    private void verifyFefoNegativeCasesStep(InboundInspectionFlow flow, String inboundCode, String token) {
+        flow.verifyFefoNegativeCases(inboundCode, token);
     }
 
-    private void markReceivedIfAllowed(WmsApiClient wmsApiClient, String inboundCode, String token) {
-        try {
-            wmsApiClient.receivedPoAtWarehouse(inboundCode, token);
-        } catch (IllegalStateException e) {
-            if (!e.getMessage().contains("không được phép nhận vào kho")) {
-                throw e;
-            }
-            System.out.println("Skip receiving PO because current status is not receivable: " + inboundCode);
-        }
+    @Step("Kiểm tra từ chối các trường hợp Serial không hợp lệ cho PO {inboundCode}")
+    private void verifySerialNegativeCasesStep(InboundInspectionFlow flow, String inboundCode, String token) {
+        flow.verifySerialNegativeCases(inboundCode, token);
     }
 
-    private void assertInboundProductsVisible(
-            List<InboundProductData> expectedProducts,
-            List<ScannedInboundProduct> actualProducts,
-            String boxCode) {
-        for (InboundProductData expected : expectedProducts) {
-            ScannedInboundProduct actual = actualProducts.stream()
-                    .filter(product -> normalized(expected.getSku()).equals(normalized(product.sku())))
-                    .findFirst()
-                    .orElse(null);
-            Assert.assertNotNull(actual, "SKU not found after scanning box " + boxCode + ": " + expected.getSku());
-            Assert.assertEquals(actual.boxCode(), boxCode, "Unexpected box code for SKU " + expected.getSku());
-            Assert.assertEquals(
-                    actual.quantityTotalInbound(),
-                    expected.getQuantity(),
-                    "Unexpected inbound quantity for SKU " + expected.getSku() + " after scanning box " + boxCode);
-        }
-    }
-
-    private List<InboundProductData> expectedProductsForBox(
-            List<InboundPackageData> inboundPackages,
-            String boxCode,
-            List<InboundProductData> fallbackProducts) {
-        int packageIndex = packageIndexFromBoxCode(boxCode);
-        if (packageIndex >= 0 && packageIndex < inboundPackages.size()) {
-            return inboundPackages.get(packageIndex).getProducts();
-        }
-        return fallbackProducts;
-    }
-
-    private int packageIndexFromBoxCode(String boxCode) {
-        if (boxCode == null) {
-            return -1;
-        }
-        String digits = boxCode.replaceAll("\\D+", "");
-        if (digits.isBlank()) {
-            return -1;
-        }
-        try {
-            return Integer.parseInt(digits) - 1;
-        } catch (NumberFormatException e) {
-            return -1;
-        }
-    }
-
-    private void assertScannedProductsReadable(List<ScannedInboundProduct> products, String boxCode) {
-        for (ScannedInboundProduct product : products) {
-            Assert.assertEquals(product.boxCode(), boxCode, "Unexpected box code for scanned product");
-            Assert.assertFalse(product.sku().isBlank(), "Scanned product SKU must not be blank");
-            Assert.assertTrue(product.quantityTotalInbound() > 0, "Scanned product quantity must be positive: " + product.sku());
-            Assert.assertTrue(product.quantityInbound() >= 0, "Remaining scanned product quantity must not be negative: " + product.sku());
-        }
-    }
-
-    private Map<String, List<POSku>> skusByBox(List<POSku> shipmentSkus) {
-        Map<String, List<POSku>> grouped = new LinkedHashMap<>();
-        for (POSku sku : shipmentSkus) {
-            if (sku.boxCode() == null || sku.boxCode().isBlank()) {
-                continue;
-            }
-            grouped.computeIfAbsent(sku.boxCode(), ignored -> new ArrayList<>()).add(sku);
-        }
-        return grouped;
-    }
-
-    private List<String> boxCodesToInspect(
-            WmsApiClient wmsApiClient,
-            String inboundCode,
-            String token,
-            int inspectionLimit) {
-        List<String> boxCodes = inspectionLimit > 0
-                ? wmsApiClient.getPendingPoBoxes(inboundCode, token, inspectionLimit)
-                : wmsApiClient.getPendingPoBoxes(inboundCode, token);
-        if (boxCodes.isEmpty()) {
-            return boxCodes;
-        }
-        String preferredBoxCode = ConfigReader.get("INBOUND_BOX_CODE");
-        if (preferredBoxCode == null || preferredBoxCode.isBlank() || !boxCodes.remove(preferredBoxCode)) {
-            if (preferredBoxCode != null && !preferredBoxCode.isBlank()) {
-                System.out.println("Skip preferred inbound box because it is already received or not found: " + preferredBoxCode);
-            }
-            return boxCodes;
-        }
-        boxCodes.add(0, preferredBoxCode);
-        return boxCodes;
-    }
-
-    private void assertShipmentSkusReadable(List<POSku> products, String boxCode) {
-        for (POSku product : products) {
-            Assert.assertEquals(product.boxCode(), boxCode, "Unexpected box code from shipment DS SKU");
-            Assert.assertNotNull(product.partnerCode(), "Shipment DS SKU must not be null");
-            Assert.assertFalse(product.partnerCode().isBlank(), "Shipment DS SKU must not be blank");
-            Assert.assertTrue(product.quantityInbound() > 0, "Shipment DS SKU inbound quantity must be positive: " + product.partnerCode());
-        }
-    }
-
-    private Map<String, POSku> productMetadataBySku(List<POSku> products, String boxCode) {
-        Map<String, POSku> metadata = new LinkedHashMap<>();
-        if (products.isEmpty()) {
-            System.out.println("Inspection API has no product metadata for box " + boxCode + "; using UI quantity and default dimensions");
-            return metadata;
-        }
-        assertShipmentSkusReadable(products, boxCode);
-        for (POSku product : products) {
-            metadata.put(normalized(product.partnerCode()), product);
-        }
-        return metadata;
-    }
-
-    private Map<String, POSku> productMetadataForBox(
-            WmsApiClient wmsApiClient,
-            String inboundCode,
-            String boxCode,
-            String token) {
-        if (!Boolean.parseBoolean(ConfigReader.getOrDefault("INBOUND_USE_INSPECTION_API_METADATA", "false"))) {
-            return Collections.emptyMap();
-        }
-        return productMetadataBySku(wmsApiClient.findInspectionProducts(inboundCode, boxCode, token), boxCode);
-    }
-
-    private POSku productForInspection(ScannedInboundProduct scannedProduct, Map<String, POSku> productMetadata) {
-        POSku metadata = productMetadata.get(normalized(scannedProduct.sku()));
-        if (metadata == null) {
-            return new POSku(
-                    scannedProduct.boxCode(),
-                    scannedProduct.quantityInbound(),
-                    scannedProduct.sku(),
-                    null,
-                    null,
-                    null,
-                    null);
-        }
-        return new POSku(
-                scannedProduct.boxCode(),
-                scannedProduct.quantityInbound(),
-                scannedProduct.sku(),
-                metadata.goodsW(),
-                metadata.goodsD(),
-                metadata.goodsH(),
-                metadata.goodsWeight());
-    }
-
-    private void inspectOpenedProduct(InboundProductWmsPage inboundWms, POSku product) {
-        inboundWms.inputGoodQuantity(product.quantityInbound());
-        inboundWms.inputBarcodeFromProductModal();
-        inboundWms.inputBatchLotIfPresent();
-        inboundWms.inputSerialsIfPresent(product.quantityInbound(), product.partnerCode());
-        inboundWms.inputShelfLifeDatesIfPresent();
-        inboundWms.inputProductDimensions(product);
-        inboundWms.confirmInspectWithRedlineRetry(product);
-    }
-
-    private void inspectSingleProductHappyCase(WmsApiClient wmsApiClient, String inboundCode, String token) {
-        OpenedInboundProduct openedProduct = openFirstProductForInspection(wmsApiClient, inboundCode, token);
-        inspectOpenedProduct(openedProduct.page, openedProduct.product);
-        List<String> remainingBoxes = waitForRemainingBoxesAfterInspection(wmsApiClient, inboundCode, token);
-        Assert.assertFalse(
-                remainingBoxes.contains(openedProduct.boxCode),
-                "Happy inbound inspection should complete box " + openedProduct.boxCode);
-    }
-
-    private OpenedInboundProduct openFirstProductForInspection(
-            WmsApiClient wmsApiClient,
-            String inboundCode,
-            String token) {
-        List<String> boxCodes = boxCodesToInspect(wmsApiClient, inboundCode, token, 1);
-        Assert.assertFalse(boxCodes.isEmpty(), "No pending PO boxes to inspect for " + inboundCode);
-        String boxCode = boxCodes.get(0);
-
-        InboundProductWmsPage inboundWms = openInspectionAndScanPo(inboundCode);
-        inboundWms.scanBoxIfNeeded(boxCode);
-        ScannedInboundProduct scannedProduct = inboundWms.openFirstInspectableProduct(boxCode);
-        Assert.assertNotNull(scannedProduct, "No inspectable product found in box " + boxCode);
-
-        POSku product = productForInspection(scannedProduct, Collections.emptyMap());
-        return new OpenedInboundProduct(inboundWms, boxCode, product);
-    }
-
-    private void inputNegativeInspectionData(
-            InboundProductWmsPage inboundWms,
-            POSku product,
-            FifoNegativeCase negativeCase,
-            String validBarcode) {
-        inputValidInspectionData(inboundWms, product, validBarcode);
-        if (negativeCase == FifoNegativeCase.QUANTITY_TOO_LARGE) {
-            inboundWms.inputGoodQuantity(product.quantityInbound() + 1);
-        } else if (negativeCase == FifoNegativeCase.WRONG_BARCODE) {
-            inboundWms.inputBarcode("WRONG-BARCODE-" + System.currentTimeMillis());
-        } else {
-            inboundWms.clearProductDimension(negativeCase.omittedDimensionField());
-        }
-    }
-
-    private void inputFefoNegativeInspectionData(
-            InboundProductWmsPage inboundWms,
-            POSku product,
-            FefoNegativeCase negativeCase,
-            String validBarcode) {
-        inputValidInspectionData(inboundWms, product, validBarcode);
-        if (negativeCase == FefoNegativeCase.MISSING_SHELF_LIFE_DATES) {
-            inboundWms.clearShelfLifeDatesIfPresent();
-        } else {
-            inboundWms.inputMismatchedShelfLifeDatesIfPresent();
-        }
-    }
-
-    private void inputSerialNegativeInspectionData(
-            InboundProductWmsPage inboundWms,
-            POSku product,
-            SerialNegativeCase negativeCase,
-            String validBarcode) {
-        inputValidInspectionData(inboundWms, product, validBarcode);
-        if (negativeCase == SerialNegativeCase.MISSING_SERIAL) {
-            inboundWms.inputSerialsIfPresent(
-                    product.quantityInbound(),
-                    product.partnerCode(),
-                    Math.max(0, product.quantityInbound() - 1));
-        } else if (negativeCase == SerialNegativeCase.DUPLICATE_SERIAL) {
-            inboundWms.inputDuplicateSerialsIfPresent(product.partnerCode());
-        }
-    }
-
-    private String submitSerialNegativeInspection(InboundProductWmsPage inboundWms) {
-        if (inboundWms.isSerialModalVisible()) {
-            String validationText = inboundWms.visibleValidationText();
-            if (!validationText.isBlank()) {
-                return validationText;
-            }
-        }
-        if (inboundWms.isConfirmInspectDisabled()) {
-            String validationText = inboundWms.visibleValidationText();
-            return validationText.isBlank()
-                    ? "Inspect submit is disabled because required serials are not complete"
-                    : validationText;
-        }
-        return inboundWms.submitInspectExpectingValidation();
-    }
-
-    private void inputValidInspectionData(
-            InboundProductWmsPage inboundWms,
-            POSku product,
-            String validBarcode) {
-        inboundWms.inputGoodQuantity(product.quantityInbound());
-        inboundWms.inputBarcode(validBarcode);
-        inboundWms.inputShelfLifeDatesIfPresent();
-        inboundWms.inputProductDimensions(product);
-    }
-
-    private List<InboundPackageData> singleProductInboundPackages(String sku, int quantity) {
-        InboundProductData product = new InboundProductData();
-        product.setSku(sku);
-        product.setQuantity(quantity);
-        return List.of(new InboundPackageData(List.of(product)));
-    }
-
-    private String normalized(String value) {
-        return value == null ? "" : value.replaceAll("[^A-Za-z0-9]", "").toLowerCase(Locale.ROOT);
-    }
-
-    private void assertFifoValidationMessage(FifoNegativeCase negativeCase, String validationText) {
-        if (negativeCase == FifoNegativeCase.QUANTITY_TOO_LARGE) {
-            assertValidationContainsAny("FIFO " + negativeCase, validationText, "so luong", "quantity");
-        } else if (negativeCase == FifoNegativeCase.WRONG_BARCODE) {
-            assertValidationContainsAny("FIFO " + negativeCase, validationText, "barcode");
-        } else {
-            String field = negativeCase.omittedDimensionField();
-            if ("weight".equals(field)) {
-                assertValidationContainsAny("FIFO " + negativeCase, validationText, "can nang", "khoi luong", "gram");
-            } else if ("length".equals(field)) {
-                assertValidationContainsAny("FIFO " + negativeCase, validationText, "chieu dai", "the tich");
-            } else if ("width".equals(field)) {
-                assertValidationContainsAny("FIFO " + negativeCase, validationText, "chieu rong", "the tich");
-            } else {
-                assertValidationContainsAny("FIFO " + negativeCase, validationText, "chieu cao", "the tich");
-            }
-        }
-    }
-
-    private void assertFefoValidationMessage(FefoNegativeCase negativeCase, String validationText) {
-        if (negativeCase == FefoNegativeCase.MISSING_SHELF_LIFE_DATES) {
-            assertValidationContainsAny("FEFO " + negativeCase, validationText, "ngay san xuat", "han su dung", "ngay het han");
-        } else {
-            assertValidationContainsAny("FEFO " + negativeCase, validationText, "shelf life", "khong khop");
-        }
-    }
-
-    private void assertSerialValidationMessage(SerialNegativeCase negativeCase, String validationText) {
-        if (negativeCase == SerialNegativeCase.DUPLICATE_SERIAL) {
-            assertValidationContainsAny("SERIAL " + negativeCase, validationText, "serial", "ton tai", "trung");
-        } else {
-            assertValidationContainsAny("SERIAL " + negativeCase, validationText, "serial", "chua du", "0/2", "1/2");
-        }
-    }
-
-    private void assertValidationContainsAny(String caseName, String validationText, String... expectedKeywords) {
-        String normalizedText = normalizedMessage(validationText);
-        for (String keyword : expectedKeywords) {
-            if (normalizedText.contains(normalizedMessage(keyword))) {
-                return;
-            }
-        }
-        Assert.fail(caseName
-                + " validation did not contain expected keywords "
-                + List.of(expectedKeywords)
-                + ". Actual validation="
-                + validationText);
-    }
-
-    private String normalizedMessage(String value) {
-        if (value == null) {
-            return "";
-        }
-        return Normalizer.normalize(value, Normalizer.Form.NFD)
-                .replaceAll("\\p{M}", "")
-                .replace('đ', 'd')
-                .replace('Đ', 'D')
-                .replace('Ä', 'A')
-                .replace('�', ' ')
-                .toLowerCase(Locale.ROOT)
-                .replaceAll("\\s+", " ")
-                .trim();
-    }
-
-    private String summarizeBoxCodes(List<String> boxCodes) {
-        if (boxCodes.size() <= 10) {
-            return boxCodes.toString();
-        }
-        List<String> firstBoxes = boxCodes.subList(0, 5);
-        List<String> lastBoxes = boxCodes.subList(boxCodes.size() - 3, boxCodes.size());
-        return firstBoxes + " ... " + lastBoxes + " (total=" + boxCodes.size() + ")";
-    }
-
-    private static final class BoxInspectionResult {
-        private final boolean shouldContinueBox;
-        private final int inspectedProducts;
-        private final int skippedProducts;
-
-        private BoxInspectionResult(boolean shouldContinueBox, int inspectedProducts, int skippedProducts) {
-            this.shouldContinueBox = shouldContinueBox;
-            this.inspectedProducts = inspectedProducts;
-            this.skippedProducts = skippedProducts;
-        }
-
-        private static BoxInspectionResult continueBox(int inspectedProducts, int skippedProducts) {
-            return new BoxInspectionResult(true, inspectedProducts, skippedProducts);
-        }
-
-        private static BoxInspectionResult stop(int skippedProducts) {
-            return new BoxInspectionResult(false, 0, skippedProducts);
-        }
-
-        private static BoxInspectionResult stopAfterInspect(int inspectedProducts, int skippedProducts) {
-            return new BoxInspectionResult(false, inspectedProducts, skippedProducts);
-        }
-    }
-
-    private static final class OpenedInboundProduct {
-        private final InboundProductWmsPage page;
-        private final String boxCode;
-        private final POSku product;
-
-        private OpenedInboundProduct(InboundProductWmsPage page, String boxCode, POSku product) {
-            this.page = page;
-            this.boxCode = boxCode;
-            this.product = product;
-        }
-    }
-
-    private enum FifoNegativeCase {
-        QUANTITY_TOO_LARGE(null),
-        WRONG_BARCODE(null),
-        MISSING_LENGTH("length"),
-        MISSING_WIDTH("width"),
-        MISSING_HEIGHT("height"),
-        MISSING_WEIGHT("weight");
-
-        private final String omittedDimensionField;
-
-        FifoNegativeCase(String omittedDimensionField) {
-            this.omittedDimensionField = omittedDimensionField;
-        }
-
-        private String omittedDimensionField() {
-            return omittedDimensionField;
-        }
-    }
-
-    private enum FefoNegativeCase {
-        MISSING_SHELF_LIFE_DATES,
-        MISMATCHED_SHELF_LIFE_DATES
-    }
-
-    private enum SerialNegativeCase {
-        NO_SERIAL,
-        MISSING_SERIAL,
-        DUPLICATE_SERIAL
+    @Step("Kiểm tra từ chối hàng Batch khi thiếu mã Lô cho PO {inboundCode}")
+    private void verifyMissingBatchLotRejectedStep(InboundInspectionFlow flow, String inboundCode, String token) {
+        flow.verifyMissingBatchLotRejected(inboundCode, token);
     }
 }

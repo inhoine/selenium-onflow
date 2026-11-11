@@ -4,6 +4,8 @@ import com.example.seleniumtestng.config.ConfigReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
@@ -39,14 +41,28 @@ public final class DriverFactory {
                 break;
             case "chrome":
                 ChromeOptions options = new ChromeOptions();
-                options.addArguments("--no-first-run", "--no-default-browser-check");
+                options.addArguments("--no-first-run", "--no-default-browser-check", "--start-maximized");
+                // Auto-allow local network access to connect to local services (QZ Tray printer on localhost)
+                options.addArguments(
+                        "--disable-features=LocalNetworkAccessCheck,PrivateNetworkAccessPermissionPrompt,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights,PrivateNetworkAccessRespectPreflightResults");
+                options.addArguments(
+                        "--unsafely-treat-insecure-origin-as-secure=https://stg-wms.onflow.vn,http://localhost:8182,ws://localhost:8182,wss://localhost:8181,http://127.0.0.1:8182,ws://127.0.0.1:8182,wss://127.0.0.1:8181");
+
+                Map<String, Object> prefs = new HashMap<>();
+                prefs.put("profile.default_content_setting_values.local_network_access", 1);
+                prefs.put("profile.default_content_setting_values.loopback_private_network_access", 1);
+                prefs.put("profile.content_settings.exceptions.local_network_access.*.setting", 1);
+                prefs.put("profile.default_content_setting_values.notifications", 1);
+                options.setExperimentalOption("prefs", prefs);
+
                 if (headless) {
                     options.addArguments("--headless=new", "--disable-gpu", "--window-size=1920,1080");
                 }
                 driver = new ChromeDriver(options);
                 break;
             default:
-                throw new IllegalArgumentException("Unsupported browser: " + normalized + ". Use chrome, firefox, or edge.");
+                throw new IllegalArgumentException(
+                        "Unsupported browser: " + normalized + ". Use chrome, firefox, or edge.");
         }
         driver.manage().timeouts().implicitlyWait(Duration.ZERO);
         driver.manage().window().maximize();

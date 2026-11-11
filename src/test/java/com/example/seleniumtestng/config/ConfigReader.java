@@ -23,6 +23,19 @@ public final class ConfigReader {
         } catch (IOException e) {
             throw new IllegalStateException("Unable to load config.properties", e);
         }
+
+        // Optional multi-environment overlay (e.g. -Denv=uat -> loads config.uat.properties)
+        String env = System.getProperty("env");
+        if (env != null && !env.isBlank()) {
+            String envConfigFile = "config." + env.trim().toLowerCase() + ".properties";
+            try (InputStream envStream = ConfigReader.class.getClassLoader().getResourceAsStream(envConfigFile)) {
+                if (envStream != null) {
+                    PROPERTIES.load(new InputStreamReader(envStream, StandardCharsets.UTF_8));
+                }
+            } catch (IOException ignored) {
+            }
+        }
+
         loadDotEnv();
     }
 
@@ -73,45 +86,42 @@ public final class ConfigReader {
         return Boolean.parseBoolean(value.trim());
     }
 
-    public static Duration timeout() {
-        return Duration.ofMillis(Long.parseLong(getOrDefault("TEST_TIMEOUT", "15000")));
-    }
-
     public static String getOrDefault(String key, String defaultValue) {
         String value = get(key);
         return hasText(value) ? value : defaultValue;
     }
 
-    private static void loadDotEnv() {
-        Path envPath = Path.of(".env");
-        if (!Files.exists(envPath)) {
-            return;
-        }
-
-        try {
-            for (String rawLine : Files.readAllLines(envPath, StandardCharsets.UTF_8)) {
-                String line = rawLine.trim();
-                if (line.isEmpty() || line.startsWith("#") || !line.contains("=")) {
-                    continue;
-                }
-                int separator = line.indexOf('=');
-                String key = line.substring(0, separator).trim();
-                String value = line.substring(separator + 1).trim();
-                DOTENV.put(key, stripQuotes(value));
-            }
-        } catch (IOException e) {
-            throw new IllegalStateException("Unable to read .env", e);
-        }
-    }
-
-    private static String stripQuotes(String value) {
-        if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
-            return value.substring(1, value.length() - 1);
-        }
-        return value;
+    public static Duration timeout() {
+        return Duration.ofMillis(Long.parseLong(getOrDefault("TEST_TIMEOUT", "15000")));
     }
 
     private static boolean hasText(String value) {
         return value != null && !value.trim().isEmpty();
+    }
+
+    private static void loadDotEnv() {
+        Path dotEnvPath = Path.of(".env");
+        if (!Files.isRegularFile(dotEnvPath)) {
+            return;
+        }
+        try {
+            for (String rawLine : Files.readAllLines(dotEnvPath, StandardCharsets.UTF_8)) {
+                String line = rawLine.trim();
+                if (line.isEmpty() || line.startsWith("#")) {
+                    continue;
+                }
+                int equalsIndex = line.indexOf('=');
+                if (equalsIndex <= 0) {
+                    continue;
+                }
+                String key = line.substring(0, equalsIndex).trim();
+                String value = line.substring(equalsIndex + 1).trim();
+                if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
+                    value = value.substring(1, value.length() - 1);
+                }
+                DOTENV.put(key, value);
+            }
+        } catch (IOException ignored) {
+        }
     }
 }

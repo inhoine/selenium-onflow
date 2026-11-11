@@ -1,7 +1,12 @@
 {
   "inboundPackages": [
     {
-      "products": [{ "sku": "SE_01", "quantity": 20 }]
+      "products": [
+        {
+          "sku": "FEFO_ALO",
+          "quantity": 200
+        }
+      ]
     }
   ],
   "orderProducts": [
