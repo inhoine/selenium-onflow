@@ -4,7 +4,6 @@ import com.example.seleniumtestng.config.ConfigReader;
 import com.example.seleniumtestng.models.PackingOrder;
 import com.example.seleniumtestng.models.PickupItem;
 import com.example.seleniumtestng.utils.Log;
-import com.example.seleniumtestng.utils.ScanTable;
 import java.time.Duration;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -32,43 +31,41 @@ public class PackingStationB2cPage extends BasePage {
     // --- Table / Station Locators ---
     private final By stationCodeInput = By.id("packing-table-code");
     private final By connectStationButton = By.xpath(
-            "//button[contains(normalize-space(),'Kết nối trạm đóng hàng') or contains(normalize-space(),'Ket noi tram dong hang')]");
+            "//button[contains(normalize-space(),'Kết nối trạm đóng hàng') "
+                    + "or contains(normalize-space(),'Ket noi tram dong hang') "
+                    + "or (ancestor::div[contains(@class,'modal')] and contains(normalize-space(),'Kết nối'))]");
     private final By stationHeaderButton = By.cssSelector(".packing-workstation__table-button");
-    private final By stationModal = By.cssSelector(".scan-packing-table-modal, .modal.show");
 
     // --- Basket / Trolley / Pickup Locators ---
     private final By basketInput = By.id("b2c-workstation-basket");
     private final By basketConfirmButton = By.xpath(
             "//div[input[@id='b2c-workstation-basket']]//button[normalize-space()='Nhập']");
-    private final By resetBasketButton = By.cssSelector(".packing-workstation__reset-basket");
+    private final By resetBasketButton = By.xpath(
+            "//button[contains(@class,'packing-workstation__reset-basket') "
+                    + "or contains(normalize-space(),'Quét rổ mới') "
+                    + "or contains(normalize-space(),'Scan new trolley') "
+                    + "or contains(normalize-space(),'Quet ro moi')]");
 
     // --- Product / SKU / Serial Locators ---
     private final By productScanInput = By.id("b2c-workstation-scan");
-    private final By productConfirmButton = By.xpath(
-            "//div[input[@id='b2c-workstation-scan']]//button[normalize-space()='Nhập']");
+    private final By productSubmitButton = By.cssSelector(".packing-workstation__scan-action button[type='submit']");
 
     // --- Additional Controls & Modals ---
-    private final By detailButton = By.xpath(
-            "//button[contains(normalize-space(),'Chi tiết') or contains(normalize-space(),'Chi tiet')]");
-    private final By printerErrorModal = By.xpath(
-            "//div[@aria-labelledby='qz-printer-error-title' or contains(.,'Kết nối máy in') or contains(.,'Chưa thể kết nối')][contains(@class,'show')]");
     private final By printerModalCloseButton = By.xpath(
             "//div[@aria-labelledby='qz-printer-error-title' or contains(.,'Kết nối máy in') or contains(.,'Chưa thể kết nối')]//button[normalize-space()='Đóng' or contains(@class,'btn-close') or @aria-label='Close']");
 
     // --- NVL (Packaging Material) Locators ---
-    private final By stationMaterialScanInput = By.id("station-b2c-material-scan");
-    private final By materialInput = By.xpath("//input[@placeholder='Quét hoặc nhập mã vật liệu đóng gói']");
-    private final By materialPromptModal = By.xpath(
-            "//div[contains(@class,'modal') and contains(@class,'show')]//*[contains(normalize-space(),'vật liệu') "
-                    + "or contains(normalize-space(),'Vật liệu') or contains(normalize-space(),'NVL') "
-                    + "or contains(normalize-space(),'bao bì') or contains(normalize-space(),'Bao bì') "
-                    + "or contains(@class,'packing-workstation__material-scan')]");
-
-    private final ScanTable scanTableHelper;
+    private final By stationMaterialScanInput = By.cssSelector(
+            "#station-b2c-material-scan, input[name='station-b2c-material-scan'], .packing-workstation__material-scan input");
+    private final By materialPromptModal = By.cssSelector(
+            ".packing-workstation__material-scan, #station-b2c-main-materials-heading, .packing-workstation__material-scan-input");
+    private final By activeOrderTracking = By.cssSelector(
+            ".packing-workstation__order-code strong, .packing-workstation__material-scan strong.link-secondary, .packing-workstation__order-progress strong");
+    private final By attachedDocumentsConfirmButton = By.xpath(
+            "//button[@id='confirm-had-print-all' or contains(normalize-space(),'Xác nhận đã in hết') or contains(normalize-space(),'xac nhan da in het')]");
 
     public PackingStationB2cPage(WebDriver driver) {
         super(driver);
-        this.scanTableHelper = new ScanTable(driver);
     }
 
     /**
@@ -85,11 +82,8 @@ public class PackingStationB2cPage extends BasePage {
     public void waitForPageLoaded() {
         wait.withTimeout(Duration.ofSeconds(20))
                 .until(ExpectedConditions.urlContains(PATH));
-        // Allow React page to fully render before interacting with modals
-        try {
-            Thread.sleep(1500);
-        } catch (InterruptedException ignored) {
-        }
+        // Allow React SPA components to mount and trigger station checks
+        pause(1000);
         dismissPrinterModalIfPresent();
     }
 
@@ -107,9 +101,21 @@ public class PackingStationB2cPage extends BasePage {
             throw new org.openqa.selenium.TimeoutException(
                     "Station modal input (id=packing-table-code) not visible after openStationModalIfNeeded()");
         }
-        input.click();
-        input.sendKeys(Keys.chord(Keys.CONTROL, "a"), Keys.DELETE);
-        input.sendKeys(tableCode);
+        try {
+            input.click();
+            input.sendKeys(Keys.chord(Keys.CONTROL, "a"), Keys.DELETE);
+            input.sendKeys(tableCode);
+        } catch (ElementClickInterceptedException e) {
+            dismissPrinterModalIfPresent();
+            setInputValue(input, tableCode);
+        }
+
+        pause(300);
+        // Ensure input value is synchronized in React
+        if (!tableCode.equals(input.getAttribute("value"))) {
+            setInputValue(input, tableCode);
+            pause(200);
+        }
 
         // Click connect button or press ENTER
         WebElement connectBtn = findVisibleEnabled(connectStationButton, 1500);
@@ -126,11 +132,28 @@ public class PackingStationB2cPage extends BasePage {
         }
 
         // Wait for station modal to close automatically after connecting
+        boolean closed = false;
         try {
-            shortWait(5000).until(driver -> !isStationModalVisible());
+            shortWait(3000).until(driver -> !isStationModalVisible());
+            closed = true;
             Log.info("Station modal closed automatically after connecting");
         } catch (Exception e) {
-            // If a printer modal appeared, dismiss it
+            dismissPrinterModalIfPresent();
+        }
+
+        // Fallback: If modal still hasn't closed, retry pressing ENTER
+        if (!closed && isStationModalVisible()) {
+            Log.warn("Station modal still visible after first submit attempt, retrying with ENTER...");
+            try {
+                input.sendKeys(Keys.ENTER);
+                shortWait(3000).until(driver -> !isStationModalVisible());
+                closed = true;
+            } catch (Exception ignored) {
+                dismissPrinterModalIfPresent();
+            }
+        }
+
+        if (!closed && isStationModalVisible()) {
             dismissPrinterModalIfPresent();
             try {
                 shortWait(2000).until(driver -> !isStationModalVisible());
@@ -143,42 +166,11 @@ public class PackingStationB2cPage extends BasePage {
     }
 
     /**
-     * Closes the station scan modal using its X button or cancel button if still
-     * visible.
-     */
-    private void closeStationModalIfPresent() {
-        try {
-            // Try X (btn-close) inside the station modal header
-            List<WebElement> closeBtns = driver.findElements(By.xpath(
-                    "//div[contains(@class,'scan-packing-table-modal')]//button[contains(@class,'btn-close') or @aria-label='Close']"));
-            for (WebElement btn : closeBtns) {
-                if (btn.isDisplayed()) {
-                    jsClick(btn);
-                    Log.info("Closed station modal via X button");
-                    Thread.sleep(500);
-                    return;
-                }
-            }
-            // Fallback: "Huỷ bỏ" cancel button in station modal
-            List<WebElement> cancelBtns = driver.findElements(By.xpath(
-                    "//div[contains(@class,'scan-packing-table-modal')]//button[contains(normalize-space(),'Huỷ') or contains(normalize-space(),'Huy')]"));
-            for (WebElement btn : cancelBtns) {
-                if (btn.isDisplayed()) {
-                    jsClick(btn);
-                    Log.info("Closed station modal via cancel button");
-                    Thread.sleep(500);
-                    return;
-                }
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    /**
      * Step 2: Scan Basket / Trolley / Pickup Order Code
      */
     public void scanBasketOrPickup(String scanCode) {
         dismissPrinterModalIfPresent();
+        resetBasketIfNeeded();
         WebElement input = wait.until(driver -> findVisibleInput(basketInput));
         try {
             input.click();
@@ -187,6 +179,12 @@ public class PackingStationB2cPage extends BasePage {
         } catch (ElementClickInterceptedException e) {
             dismissPrinterModalIfPresent();
             setInputValue(input, scanCode);
+        }
+
+        pause(200);
+        if (!scanCode.equals(input.getAttribute("value"))) {
+            setInputValue(input, scanCode);
+            pause(200);
         }
 
         WebElement confirmBtn = findVisibleEnabled(basketConfirmButton, 1000);
@@ -201,14 +199,47 @@ public class PackingStationB2cPage extends BasePage {
         }
 
         dismissPrinterModalIfPresent();
-        // Allow page time to process the basket scan and render order/product area
+        // Wait dynamically for product scan input (b2c-workstation-scan) to appear
         try {
-            Thread.sleep(2500);
-        } catch (InterruptedException ignored) {
+            shortWait(5000).until(driver -> findVisibleInput(productScanInput) != null);
+        } catch (Exception ignored) {
+            pause(500);
         }
         dismissPrinterModalIfPresent();
         Log.info("Completed scanning basket/pickup code: {}. Visible inputs after scan: [{}]",
                 scanCode, getVisibleInputsSummary());
+    }
+
+    public boolean isBasketInputVisible() {
+        return findVisibleInput(basketInput) != null;
+    }
+
+    public void resetBasketIfNeeded() {
+        dismissPrinterModalIfPresent();
+        if (isBasketInputVisible()) {
+            return;
+        }
+        try {
+            shortWait(3000).until(driver -> isBasketInputVisible() || !driver.findElements(resetBasketButton).isEmpty());
+        } catch (Exception ignored) {
+        }
+        if (isBasketInputVisible()) {
+            return;
+        }
+        for (WebElement btn : driver.findElements(resetBasketButton)) {
+            try {
+                if (btn.isDisplayed() && btn.isEnabled()) {
+                    jsClick(btn);
+                    Log.info("Clicked reset basket button (.packing-workstation__reset-basket)");
+                    break;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        try {
+            shortWait(3000).until(driver -> isBasketInputVisible());
+        } catch (Exception ignored) {
+        }
     }
 
     /**
@@ -216,19 +247,19 @@ public class PackingStationB2cPage extends BasePage {
      * Falls back to JavaScript value-set when direct sendKeys is not interactable.
      */
     public void scanProduct(String scanCode) {
-        dismissPrinterModalIfPresent();
+        if (isPackagingMaterialPromptVisible()) {
+            Log.info("NVL step already visible when entering scanProduct({}) — aborting product scan", scanCode);
+            return;
+        }
 
-        // Use visibleWithin (null-safe) so we can log diagnostics on failure instead of
-        // raw timeout
-        WebElement input = visibleWithin(productScanInput, 15000);
+        WebElement input = visibleWithin(productScanInput, 5000);
         if (input == null) {
-            // Check if NVL step already appeared (all products already scanned)
             if (isPackagingMaterialPromptVisible()) {
                 Log.info("NVL step already visible when trying to scan product {} — stopping scan loop", scanCode);
                 return;
             }
             String visibleInputs = getVisibleInputsSummary();
-            Log.warn("Product scan input (id=b2c-workstation-scan) not visible after 15s. Visible inputs: [{}]",
+            Log.warn("Product scan input (id=b2c-workstation-scan) not visible after 5s. Visible inputs: [{}]",
                     visibleInputs);
             throw new org.openqa.selenium.TimeoutException(
                     "Product scan input (b2c-workstation-scan) not found. Visible inputs on page: " + visibleInputs);
@@ -238,39 +269,45 @@ public class PackingStationB2cPage extends BasePage {
         try {
             input.click();
             input.sendKeys(Keys.chord(Keys.CONTROL, "a"), Keys.DELETE);
-            input.sendKeys(scanCode);
+            input.sendKeys(scanCode, Keys.ENTER);
             typed = true;
         } catch (ElementClickInterceptedException e) {
             dismissPrinterModalIfPresent();
+            if (isPackagingMaterialPromptVisible()) {
+                Log.info("Packaging material modal intercepted product scan click — stopping product scan for {}", scanCode);
+                return;
+            }
         } catch (ElementNotInteractableException e) {
+            if (isPackagingMaterialPromptVisible()) {
+                Log.info("Packaging material modal open (product scan not interactable) — stopping product scan for {}", scanCode);
+                return;
+            }
             Log.warn("Product scan input not interactable via sendKeys — falling back to JS setInputValue");
         }
 
         if (!typed) {
-            // JavaScript fallback: set value and dispatch React-compatible events
-            setInputValue(input, scanCode);
-        }
-
-        // Press ENTER or click the confirm button to submit
-        WebElement confirmBtn = findVisibleEnabled(productConfirmButton, 1000);
-        if (confirmBtn != null) {
-            try {
-                confirmBtn.click();
-            } catch (ElementNotInteractableException e) {
-                jsClick(confirmBtn);
+            if (isPackagingMaterialPromptVisible()) {
+                Log.info("NVL modal visible, aborting JS setInputValue for product {}", scanCode);
+                return;
             }
-        } else {
-            try {
-                input.sendKeys(Keys.ENTER);
-            } catch (ElementNotInteractableException e) {
-                // Input lost focus after JS set — dispatch Enter via JS
+            setInputValue(input, scanCode);
+            List<WebElement> submitBtns = driver.findElements(productSubmitButton);
+            if (!submitBtns.isEmpty() && submitBtns.get(0).isDisplayed()) {
+                jsClick(submitBtns.get(0));
+            } else {
                 ((JavascriptExecutor) driver).executeScript(
                         "arguments[0].dispatchEvent(new KeyboardEvent('keydown', {key:'Enter',keyCode:13,bubbles:true}));",
                         input);
             }
         }
 
-        dismissPrinterModalIfPresent();
+        // Wait dynamically for scan to complete: input value cleared by React or NVL modal appears
+        try {
+            shortWait(800).until(driver -> isPackagingMaterialPromptVisible()
+                    || (input.getAttribute("value") == null || input.getAttribute("value").isEmpty()));
+        } catch (Exception ignored) {
+        }
+
         Log.info("Completed scanning product code: {}", scanCode);
     }
 
@@ -294,10 +331,6 @@ public class PackingStationB2cPage extends BasePage {
                     String scanCode = getItemScanCode(item, q);
                     Log.info("Scan product item [{}/{}]: code={}", (q + 1), quantity, scanCode);
                     scanProduct(scanCode);
-                    try {
-                        Thread.sleep(600);
-                    } catch (InterruptedException ignored) {
-                    }
                 }
             }
 
@@ -312,16 +345,9 @@ public class PackingStationB2cPage extends BasePage {
      * Checks whether the flow has reached the Packaging Material (NVL) step.
      */
     public boolean isPackagingMaterialPromptVisible() {
+        dismissPrinterModalIfPresent();
         if (findVisibleInput(stationMaterialScanInput) != null) {
             return true;
-        }
-        for (WebElement element : driver.findElements(materialInput)) {
-            try {
-                if (element.isDisplayed() && element.isEnabled()) {
-                    return true;
-                }
-            } catch (RuntimeException ignored) {
-            }
         }
         for (WebElement element : driver.findElements(materialPromptModal)) {
             try {
@@ -344,8 +370,7 @@ public class PackingStationB2cPage extends BasePage {
 
     /**
      * Step 4: Scan Packaging Material (NVL).
-     * Enters the material code into station-b2c-material-scan and submits with
-     * ENTER.
+     * Enters the material code into station-b2c-material-scan and submits with ENTER.
      */
     public void scanPackagingMaterial(String materialCode) {
         scanPackagingMaterial(materialCode, true);
@@ -353,10 +378,10 @@ public class PackingStationB2cPage extends BasePage {
 
     public void scanPackagingMaterial(String materialCode, boolean isLastMaterial) {
         dismissPrinterModalIfPresent();
-        WebElement input = wait.until(driver -> findVisibleInput(materialInput));
+        WebElement input = wait.until(driver -> findVisibleInput(stationMaterialScanInput));
         if (input == null) {
             throw new org.openqa.selenium.TimeoutException(
-                    "Packaging material scan input (id=station-b2c-material-scan) not found");
+                    "Packaging material scan input (#station-b2c-material-scan) not found");
         }
 
         boolean typed = false;
@@ -375,41 +400,34 @@ public class PackingStationB2cPage extends BasePage {
             setInputValue(input, materialCode);
         }
 
-        // Try confirm button next to input if present, otherwise send ENTER
-        WebElement confirmBtn = findVisibleEnabled(By.xpath(
-                "//div[input[@id='station-b2c-material-scan']]//button[normalize-space()='Nhập' or contains(@class,'btn-primary')]"),
-                1000);
-        if (confirmBtn != null) {
-            try {
-                confirmBtn.click();
-            } catch (Exception e) {
-                jsClick(confirmBtn);
-            }
-        } else {
-            try {
-                input.sendKeys(Keys.ENTER);
-            } catch (Exception e) {
-                ((JavascriptExecutor) driver).executeScript(
-                        "arguments[0].dispatchEvent(new KeyboardEvent('keydown', {key:'Enter',keyCode:13,which:13,bubbles:true}));"
-                                + "arguments[0].dispatchEvent(new KeyboardEvent('keypress', {key:'Enter',keyCode:13,which:13,bubbles:true}));"
-                                + "arguments[0].dispatchEvent(new KeyboardEvent('keyup', {key:'Enter',keyCode:13,which:13,bubbles:true}));",
-                        input);
-            }
+        pause(200);
+        if (!materialCode.equals(input.getAttribute("value"))) {
+            setInputValue(input, materialCode);
+            pause(200);
+        }
+
+        // B2C material scan input submits on ENTER keydown
+        input.sendKeys(Keys.ENTER);
+        try {
+            ((JavascriptExecutor) driver).executeScript(
+                    "arguments[0].dispatchEvent(new KeyboardEvent('keydown', {key:'Enter',keyCode:13,which:13,bubbles:true}));",
+                    input);
+        } catch (Exception ignored) {
         }
 
         dismissPrinterModalIfPresent();
         if (isLastMaterial) {
-            // Wait briefly for material scan to process and confirm attached documents if modal appears
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException ignored) {
-            }
             confirmAttachedDocumentsIfPresent();
             dismissPrinterModalIfPresent();
         } else {
+            // Wait dynamically for input to be cleared/ready for the next material code
             try {
-                Thread.sleep(600);
-            } catch (InterruptedException ignored) {
+                shortWait(2000).until(driver -> {
+                    WebElement mInput = findVisibleInput(stationMaterialScanInput);
+                    return mInput != null && (mInput.getAttribute("value") == null || mInput.getAttribute("value").isEmpty());
+                });
+            } catch (Exception ignored) {
+                pause(250);
             }
         }
         Log.info("Completed scanning packaging material code: {} (isLastMaterial={})", materialCode, isLastMaterial);
@@ -417,81 +435,115 @@ public class PackingStationB2cPage extends BasePage {
 
     public void confirmAttachedDocumentsIfPresent() {
         try {
-            for (int i = 0; i < 6; i++) {
-                List<WebElement> confirmButtons = driver.findElements(By.xpath(
-                        "//button[@id='confirm-had-print-all' or contains(normalize-space(),'Xác nhận đã in hết') or contains(normalize-space(),'xac nhan da in het')]"));
-                boolean confirmed = false;
-                for (WebElement btn : confirmButtons) {
-                    if (btn.isDisplayed() && btn.isEnabled()) {
-                        jsClick(btn);
-                        Log.info("Confirmed attached documents print");
-                        confirmed = true;
-                        break;
-                    }
-                }
-                if (confirmed) {
-                    try {
-                        Thread.sleep(500);
-                    } catch (InterruptedException ignored) {
-                    }
-                    break;
-                }
+            WebElement confirmBtn = shortWait(2000).until(driver -> {
                 dismissPrinterModalIfPresent();
-                try {
-                    Thread.sleep(500);
-                } catch (InterruptedException ignored) {
+                for (WebElement btn : driver.findElements(attachedDocumentsConfirmButton)) {
+                    if (btn.isDisplayed() && btn.isEnabled()) {
+                        return btn;
+                    }
+                }
+                return null;
+            });
+            if (confirmBtn != null) {
+                jsClick(confirmBtn);
+                Log.info("Confirmed attached documents print");
+                pause(300);
+            }
+        } catch (Exception ignored) {
+        }
+        dismissPrinterModalIfPresent();
+    }
+
+    /**
+     * Reads the tracking code of the order currently active/displayed on the B2C workstation screen,
+     * either from the order card (.packing-workstation__order-code strong) or the NVL modal header.
+     */
+    public String getCurrentActiveOrderTrackingCode() {
+        try {
+            for (WebElement el : driver.findElements(activeOrderTracking)) {
+                if (el.isDisplayed() && !el.getText().trim().isEmpty()) {
+                    String text = el.getText().trim();
+                    if (text.length() >= 5) {
+                        return text;
+                    }
                 }
             }
         } catch (Exception ignored) {
         }
+        return null;
     }
 
     /**
      * Orchestrates complete packing for orders:
-     * For each order, scans all product items, waits for the NVL step,
-     * calls API to resolve packaging material codes, and scans each resolved
-     * material code.
+     * Actively tracks which order is on screen, scans its products until the NVL step,
+     * resolves packaging materials from API, and scans the NVL codes.
      */
     public void packOrdersWithMaterial(
             List<PackingOrder> packingOrders,
             com.example.seleniumtestng.clients.WmsApiClient apiClient,
             String token) {
-        for (int i = 0; i < packingOrders.size(); i++) {
-            PackingOrder order = packingOrders.get(i);
-            Log.info("Packing order [{}/{}]: trackingCode={}", (i + 1), packingOrders.size(), order.trackingCode());
+        java.util.Set<String> completedTrackingCodes = new java.util.HashSet<>();
+        int maxRounds = packingOrders.size() * 2;
 
-            boolean nvlAppeared = false;
-            for (PickupItem item : order.items()) {
-                if (nvlAppeared) {
-                    break;
-                }
-                int quantity = item.quantitySold() > 0 ? item.quantitySold() : 1;
-                for (int q = 0; q < quantity; q++) {
-                    if (isPackagingMaterialPromptVisible()) {
-                        Log.info("Packaging material step already appeared for trackingCode={}", order.trackingCode());
-                        nvlAppeared = true;
+        for (int round = 0; round < maxRounds && completedTrackingCodes.size() < packingOrders.size(); round++) {
+            dismissPrinterModalIfPresent();
+
+            // 1. Check if the workstation has an active order on screen
+            String activeTracking = getCurrentActiveOrderTrackingCode();
+            PackingOrder order = null;
+            if (activeTracking != null && !activeTracking.isBlank()) {
+                for (PackingOrder po : packingOrders) {
+                    if (activeTracking.equals(po.trackingCode())) {
+                        order = po;
                         break;
-                    }
-
-                    String scanCode = getItemScanCode(item, q);
-                    Log.info("Scan product item [{}/{}]: code={}", (q + 1), quantity, scanCode);
-                    scanProduct(scanCode);
-                    try {
-                        Thread.sleep(600);
-                    } catch (InterruptedException ignored) {
                     }
                 }
             }
+            if (order == null) {
+                // Fallback: pick the first unpacked order
+                for (PackingOrder po : packingOrders) {
+                    if (!completedTrackingCodes.contains(po.trackingCode())) {
+                        order = po;
+                        break;
+                    }
+                }
+            }
+            if (order == null) {
+                Log.info("All packing orders have been processed");
+                break;
+            }
 
-            // Resolve packaging materials to scan for this order
+            Log.info("Packing order [{}/{}]: trackingCode={} (active on screen={})",
+                    (completedTrackingCodes.size() + 1), packingOrders.size(), order.trackingCode(), activeTracking);
+
+            // 2. Scan products only if NVL prompt is not already showing
+            if (!isPackagingMaterialPromptVisible()) {
+                for (PickupItem item : order.items()) {
+                    if (isPackagingMaterialPromptVisible()) {
+                        Log.info("Packaging material step already appeared for trackingCode={}", order.trackingCode());
+                        break;
+                    }
+                    int quantity = item.quantitySold() > 0 ? item.quantitySold() : 1;
+                    for (int q = 0; q < quantity; q++) {
+                        if (isPackagingMaterialPromptVisible()) {
+                            Log.info("Packaging material step already appeared for trackingCode={}", order.trackingCode());
+                            break;
+                        }
+                        String scanCode = getItemScanCode(item, q);
+                        Log.info("Scan product item [{}/{}]: code={}", (q + 1), quantity, scanCode);
+                        scanProduct(scanCode);
+                    }
+                }
+            } else {
+                Log.info("NVL modal already open for trackingCode={} — proceeding directly to scan NVL", order.trackingCode());
+            }
+
+            // 3. Resolve packaging materials to scan for this order
             List<String> materialCodes = apiClient.resolveMaterialScanCodes(order.trackingCode(), token);
             if (materialCodes.isEmpty()) {
                 Log.info("Order {}: Tất cả NVL đều có auto_scan=true (hoặc không có NVL cần scan). Bỏ qua bước scan NVL.",
                         order.trackingCode());
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException ignored) {
-                }
+                pause(300);
                 dismissPrinterModalIfPresent();
                 confirmAttachedDocumentsIfPresent();
                 dismissPrinterModalIfPresent();
@@ -508,12 +560,20 @@ public class PackingStationB2cPage extends BasePage {
                                 (m + 1), materialCodes.size(), materialCode, order.trackingCode());
                         scanPackagingMaterial(materialCode, isLast);
                     }
-                    try {
-                        Thread.sleep(1500);
-                    } catch (InterruptedException ignored) {
-                    }
                 } else {
                     Log.warn("Packaging material prompt did not appear for order: {}", order.trackingCode());
+                }
+            }
+
+            completedTrackingCodes.add(order.trackingCode());
+
+            if (completedTrackingCodes.size() < packingOrders.size()) {
+                // Wait dynamically for workstation to be ready for the next order or next basket
+                try {
+                    shortWait(4000).until(driver -> findVisibleInput(productScanInput) != null
+                            || findVisibleInput(basketInput) != null);
+                } catch (Exception ignored) {
+                    pause(500);
                 }
             }
         }
@@ -533,10 +593,20 @@ public class PackingStationB2cPage extends BasePage {
     }
 
     private void openStationModalIfNeeded() {
+        dismissPrinterModalIfPresent();
         if (isStationModalVisible()) {
             Log.info("Station modal already visible, skip opening");
             return;
         }
+
+        // Wait briefly for potential auto-open on page load
+        try {
+            shortWait(2000).until(driver -> isStationModalVisible());
+            Log.info("Station modal auto-opened on page load");
+            return;
+        } catch (Exception ignored) {
+        }
+
         // Click the station header button to open the modal
         List<WebElement> stationBtns = driver.findElements(stationHeaderButton);
         if (!stationBtns.isEmpty() && stationBtns.get(0).isDisplayed()) {
@@ -546,6 +616,7 @@ public class PackingStationB2cPage extends BasePage {
                 jsClick(stationBtns.get(0));
             }
             Log.info("Clicked station header button to open station modal");
+            pause(400);
         } else {
             Log.warn("Station header button not found — station modal may auto-open on page load");
         }
@@ -564,17 +635,6 @@ public class PackingStationB2cPage extends BasePage {
      */
     private boolean isStationModalVisible() {
         return findVisibleInput(stationCodeInput) != null;
-    }
-
-    private void waitForStationModalToClose() {
-        try {
-            shortWait(3000).until(driver -> {
-                List<WebElement> inputs = driver.findElements(stationCodeInput);
-                return inputs.isEmpty() || !inputs.get(0).isDisplayed();
-            });
-        } catch (RuntimeException ignored) {
-            Log.warn("Station modal did not close within timeout");
-        }
     }
 
     private WebElement findVisibleInput(By locator) {
@@ -640,6 +700,14 @@ public class PackingStationB2cPage extends BasePage {
                     .collect(Collectors.joining(", "));
         } catch (Exception e) {
             return "(error reading inputs: " + e.getMessage() + ")";
+        }
+    }
+
+    private void pause(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
         }
     }
 }

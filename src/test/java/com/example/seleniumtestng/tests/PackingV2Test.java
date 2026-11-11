@@ -7,6 +7,7 @@ import com.example.seleniumtestng.flows.AuthHelper;
 import com.example.seleniumtestng.flows.PickingPreparationFlow;
 import com.example.seleniumtestng.flows.PickupResolver;
 import com.example.seleniumtestng.models.PackingOrder;
+import com.example.seleniumtestng.models.PickOrderBasket;
 import com.example.seleniumtestng.models.PickupDetail;
 import com.example.seleniumtestng.pages.PackingStationB2cPage;
 import com.example.seleniumtestng.pages.ReceivePackingTrolleyPage;
@@ -77,17 +78,23 @@ public class PackingV2Test extends BaseTest {
         String tableCode = ConfigReader.required("DEFAULT_PACKING_TABLE_CODE");
         scanTableStep(stationPage, tableCode);
 
-        // ── 6. Scan basket / pickup ───────────────────────────────────────────
-        String scanCode = (basketCount > 0 && !pickupDetail.basketCodes().isEmpty())
-                ? pickupDetail.basketCodes().get(0)
-                : pickupId;
-        scanBasketStep(stationPage, scanCode);
-
-        // ── 7. Scan products & packaging materials (NVL) ──────────────────────
+        // ── 6 & 7. Scan basket & pack products + packaging materials (NVL) ──
         token = AuthHelper.getWmsToken(driver);
         List<PackingOrder> packingOrders = wmsApiClient.getPickupPackingOrders(pickupId, token);
         Assert.assertFalse(packingOrders.isEmpty(), "No packing orders found for pickup " + pickupId);
-        packOrdersWithMaterialStep(stationPage, packingOrders, wmsApiClient, token);
+
+        if (basketCount <= 1) {
+            String scanCode = (basketCount == 1 && !pickupDetail.basketCodes().isEmpty())
+                    ? pickupDetail.basketCodes().get(0)
+                    : pickupId;
+            scanBasketStep(stationPage, scanCode);
+            packOrdersWithMaterialStep(stationPage, packingOrders, wmsApiClient, token);
+        } else {
+            packMultiBasketPickupStep(stationPage, pickingFlow, wmsApiClient, pickupId, pickupDetail, packingOrders, token);
+        }
+
+        // ── 8. Kiểm tra trạng thái đơn hàng sau khi đóng gói ───────────────────
+        verifyOrdersPackedStep(wmsApiClient, packingOrders, token);
 
         Log.info("SUCCESS: Hoàn tất đóng gói và scan NVL cho pickup {}", pickupId);
     }
@@ -126,7 +133,6 @@ public class PackingV2Test extends BaseTest {
         page.scanBasketOrPickup(scanCode);
     }
 
-
     @Step("7. Scan sản phẩm và scan NVL theo gợi ý API (/v1/packing/material/{tracking_code})")
     private void packOrdersWithMaterialStep(
             PackingStationB2cPage page,
@@ -134,6 +140,77 @@ public class PackingV2Test extends BaseTest {
             WmsApiClient apiClient,
             String token) {
         page.packOrdersWithMaterial(orders, apiClient, token);
+    }
+
+    @Step("6 & 7. Đóng gói cho pickup nhiều rổ ({pickupId})")
+    private void packMultiBasketPickupStep(
+            PackingStationB2cPage page,
+            PickingPreparationFlow pickingFlow,
+            WmsApiClient apiClient,
+            String pickupId,
+            PickupDetail pickupDetail,
+            List<PackingOrder> packingOrders,
+            String token) {
+        List<PickOrderBasket> pickOrderBaskets = apiClient.getPickOrderBaskets(pickupId, token);
+        List<PickOrderBasket> readyBaskets = pickingFlow.readyPackingBaskets(pickOrderBaskets, pickupDetail.basketCodes());
+        Log.info("Multi-basket packing: found {} ready baskets from API", readyBaskets.size());
+
+        if (readyBaskets.isEmpty()) {
+            if (pickingFlow.allExpectedBasketsAreReadyToShip(pickOrderBaskets, pickupDetail.basketCodes())) {
+                Log.info("All MSO baskets are already packed and ready to ship. Skip packing.");
+                return;
+            }
+            List<String> basketCodes = pickupDetail.basketCodes();
+            Log.warn("No ready baskets filtered by status, falling back to all {} basket codes from pickupDetail", basketCodes.size());
+            for (int i = 0; i < basketCodes.size(); i++) {
+                String basketCode = basketCodes.get(i);
+                Log.info("Processing multi-basket [{}/{}]: basketCode={}", (i + 1), basketCodes.size(), basketCode);
+                if (i > 0) {
+                    page.resetBasketIfNeeded();
+                }
+                page.scanBasketOrPickup(basketCode);
+                List<PackingOrder> ordersToPack = (i < packingOrders.size())
+                        ? List.of(packingOrders.get(i))
+                        : packingOrders;
+                page.packOrdersWithMaterial(ordersToPack, apiClient, token);
+            }
+            return;
+        }
+
+        for (int i = 0; i < readyBaskets.size(); i++) {
+            PickOrderBasket basket = readyBaskets.get(i);
+            Log.info("Processing multi-basket [{}/{}]: basketCode={}, trackingCode={}",
+                    (i + 1), readyBaskets.size(), basket.code(), basket.trackingCode());
+            if (i > 0) {
+                page.resetBasketIfNeeded();
+            }
+            page.scanBasketOrPickup(basket.code());
+
+            PackingOrder targetOrder = null;
+            if (basket.trackingCode() != null && !basket.trackingCode().isBlank()) {
+                for (PackingOrder order : packingOrders) {
+                    if (basket.trackingCode().equals(order.trackingCode())) {
+                        targetOrder = order;
+                        break;
+                    }
+                }
+            }
+            List<PackingOrder> ordersToPack = (targetOrder != null)
+                    ? List.of(targetOrder)
+                    : (i < packingOrders.size() ? List.of(packingOrders.get(i)) : packingOrders);
+            page.packOrdersWithMaterial(ordersToPack, apiClient, token);
+        }
+    }
+
+    @Step("8. Kiểm tra trạng thái đơn hàng sau khi đóng gói")
+    private void verifyOrdersPackedStep(WmsApiClient apiClient, List<PackingOrder> orders, String token) {
+        for (PackingOrder order : orders) {
+            int statusId = apiClient.getOrderStatusId(order.trackingCode(), token);
+            Assert.assertTrue(statusId == 504 || statusId >= 604,
+                    "Đơn hàng " + order.trackingCode()
+                            + " phải ở trạng thái Đã đóng gói (status 504 hoặc >= 604), hiện tại: "
+                            + statusId);
+        }
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
